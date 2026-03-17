@@ -143,3 +143,69 @@ ActionDecision = {
 ```
 
 ---
+
+# ✅ FINAL `DataProfile`
+
+```python
+DataProfile = {
+    # =========================
+    # DATASET IDENTITY
+    # =========================
+    "dataset_name": str,
+    "dataset_type": str,        # "tabular" | "text" | "vision"
+    "problem_type": str,        # "classification" | "regression"
+
+    # =========================
+    # SIZE & SHAPE
+    # =========================
+    "num_samples": int,
+    "num_features": int,
+    "target_column": str,
+
+    # =========================
+    # FEATURE TYPES
+    # =========================
+    "numerical_columns": list[str],
+    "categorical_columns": list[str],
+
+    "feature_type_distribution": {
+        "numerical_ratio": float,
+        "categorical_ratio": float
+    },
+
+    # =========================
+    # DATA QUALITY
+    # =========================
+    "missing_value_ratio": float,
+
+    "feature_summary": [
+        {
+            "name": str,
+            "dtype": str,
+            "unique_values": int,
+            "missing_percentage": float,
+            "distribution": str   # "normal" | "skewed" | "uniform" | "unknown"
+        }
+    ],
+
+    # =========================
+    # TARGET DISTRIBUTION
+    # =========================
+    "class_distribution": dict,      # classification only
+
+    "imbalance_ratio": float,        # max_class / min_class (if classification)
+
+    # =========================
+    # STATISTICAL SIGNALS
+    # =========================
+    "feature_variance_mean": float,
+    "class_entropy": float,          # classification only
+
+    # =========================
+    # RECOMMENDATIONS (LIGHT GUIDANCE)
+    # =========================
+    "recommended_metrics": list[str]
+}
+```
+
+---
