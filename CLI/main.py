@@ -79,6 +79,9 @@ def apply_cli_overrides(config, args):
     if getattr(args, "max_iter", None) is not None:
         config["execution"]["max_iterations"] = args.max_iter
 
+    if getattr(args, "path", None) is not None:
+        config["dataset"]["path"] = args.path
+
     return config
 
 
@@ -186,6 +189,7 @@ def main():
     # -----------------
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--config", type=str, required=True)
+    run_parser.add_argument("--path", type=str)
     run_parser.add_argument("--mode", choices=["beginner", "intermediate", "expert"])
     run_parser.add_argument("--max-iter", type=int)
     run_parser.add_argument("--dry-run", action="store_true")
