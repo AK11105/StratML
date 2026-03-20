@@ -1,7 +1,7 @@
 mode: beginner
 dataset:
-  path: "/null"
-  target_column: "xyz"
+  path: null
+  target_column: null
 execution:
   max_iterations: 5
   timeout_per_run: 300
