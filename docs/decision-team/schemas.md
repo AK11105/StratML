@@ -144,7 +144,7 @@ ActionDecision = {
 
 ---
 
-# ✅ FINAL `DataProfile`
+# ✅ 3. FINAL `DataProfile`
 
 ```python
 DataProfile = {
@@ -209,3 +209,181 @@ DataProfile = {
 ```
 
 ---
+
+# ✅ 4. FINAL `StateObject`
+
+```python
+StateObject = {
+
+    # =========================
+    # META (TRACEABILITY)
+    # =========================
+    "meta": {
+        "experiment_id": str,
+        "iteration": int,
+        "timestamp": str
+    },
+
+    # =========================
+    # OBJECTIVE CONTEXT
+    # =========================
+    "objective": {
+        "primary_metric": str,        # e.g. "accuracy"
+        "optimization_goal": str,     # "maximize" | "minimize"
+    },
+
+    # =========================
+    # CURRENT PERFORMANCE
+    # =========================
+    "metrics": {
+        "primary": float,             # extracted from metrics
+
+        "secondary": {
+            "accuracy": float | None,
+            "precision": float | None,
+            "recall": float | None,
+            "f1_score": float | None,
+            "mse": float | None,
+            "rmse": float | None,
+            "r2": float | None
+        },
+
+        "train_val_gap": float        # from derived_metrics
+    },
+
+    # =========================
+    # TRAJECTORY (HISTORY-BASED)
+    # =========================
+    "trajectory": {
+        "history_length": int,
+
+        "improvement_rate": float,        # Δ metric
+        "slope": float,                  # trend over last N
+        "volatility": float,             # std dev of recent scores
+
+        "best_score": float,
+        "mean_score": float,
+
+        "steps_since_improvement": int,
+
+        "trend": str                     # "improving" | "stagnating" | "degrading"
+    },
+
+    # =========================
+    # DATASET STATE (DYNAMIC)
+    # =========================
+    "dataset": {
+        "num_samples": int,
+        "num_features": int,
+
+        "feature_to_sample_ratio": float,
+
+        "missing_ratio": float,
+
+        "class_distribution": dict | None,
+        "imbalance_ratio": float | None
+    },
+
+    # =========================
+    # MODEL CONTEXT
+    # =========================
+    "model": {
+        "model_name": str,
+        "model_type": str,          # "ml" | "dl"
+
+        "hyperparameters": dict,
+
+        "complexity_hint": str | None,   # "low" | "medium" | "high" (derived)
+
+        "training": {
+            "runtime": float,
+            "convergence_epoch": int,
+            "early_stopped": bool | None
+        }
+    },
+
+    # =========================
+    # GENERALIZATION
+    # =========================
+    "generalization": {
+        "train_loss": float,
+        "validation_loss": float,
+        "gap": float
+    },
+
+    # =========================
+    # RESOURCES / BUDGET
+    # =========================
+    "resources": {
+        "runtime": float,
+        "gpu_used": bool,
+        "cpu_time": float,
+
+        "remaining_budget": float | None,
+        "budget_exhausted": bool
+    },
+
+    # =========================
+    # SEARCH CONTEXT
+    # =========================
+    "search": {
+        "models_tried": list[str],
+        "unique_models_count": int,
+
+        "repeated_configs": int
+    },
+
+    # =========================
+    # SIGNALS (DERIVED)
+    # =========================
+    "signals": {
+
+        # fitting
+        "underfitting": bool,
+        "overfitting": bool,
+        "well_fitted": bool,
+
+        # convergence
+        "converged": bool,
+        "stagnating": bool,
+        "diverging": bool,
+
+        # stability
+        "unstable_training": bool,
+        "high_variance": bool,
+
+        # efficiency
+        "too_slow": bool,
+
+        # optimization
+        "plateau_detected": bool,
+        "diminishing_returns": bool
+    },
+
+    # =========================
+    # UNCERTAINTY (MODEL-BASED)
+    # =========================
+    "uncertainty": {
+        "prediction_variance": float | None,
+        "confidence": float | None
+    },
+
+    # =========================
+    # ACTION CONTEXT
+    # =========================
+    "action_context": {
+        "previous_action": str | None,
+        "previous_action_success": bool | None,
+        "action_effect_magnitude": float | None
+    },
+
+    # =========================
+    # CONSTRAINTS
+    # =========================
+    "constraints": {
+        "allowed_models": list[str],
+        "max_iterations": int,
+        "time_budget": float | None
+    }
+}
+```
