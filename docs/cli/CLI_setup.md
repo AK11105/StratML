@@ -1,26 +1,50 @@
-************OUTDATED***************
-<!-- For windows,
+# StratML CLI — Setup Guide
 
-Copy paste stratml.bat file into C:\Users\<name>\bin 
+---
 
-Open powershell in administrator mode,
-    Run :-
-        setx PATH "C:\Users\<name>\bin;$($env:Path)"
-    Restart 
+## Windows
 
-    Else - Manually add C:\Users\<name>\bin to user paths in env variables
+**1. Run the installer** from the `CLI/` directory in PowerShell:
 
-Confirm by running -
-        stratml init -->   
-************OUTDATED***************
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
 
+This copies `stratml.bat` to `%USERPROFILE%\bin` and adds it to your user `PATH`.
 
-*LATEST*
+**2. Restart your terminal**, then confirm:
 
-1) Run this command in the same directory as the bat file. (/stratml/CLI)
+```powershell
+stratml init
+```
 
-    powershell -ExecutionPolicy Bypass -File install.ps1
+---
 
-2) Restart terminal or VSCode and Run this to confirm
-   
-    stratml init
+## Linux / macOS
+
+**1. Make the installer executable** and run it from the `CLI/` directory:
+
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+This copies `stratml.sh` to `~/.local/bin/stratml`, makes it executable, and adds `~/.local/bin` to your `PATH` in `~/.bashrc` or `~/.zshrc`.
+
+**2. Reload your shell**, then confirm:
+
+```bash
+source ~/.bashrc   # or ~/.zshrc
+stratml init
+```
+
+---
+
+## What the installers do
+
+| Step | Windows (`install.ps1`) | Linux/macOS (`install.sh`) |
+|------|------------------------|---------------------------|
+| Bin directory | `%USERPROFILE%\bin` | `~/.local/bin` |
+| Wrapper copied | `stratml.bat` | `stratml.sh` → `stratml` |
+| PATH updated in | User environment variables | `~/.bashrc` or `~/.zshrc` |
+| Requires restart | Yes | Yes (or `source` the RC file) |
