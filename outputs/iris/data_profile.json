@@ -1,0 +1,55 @@
+{
+  "dataset_name": "iris",
+  "dataset_type": "tabular",
+  "rows": 150,
+  "columns": 5,
+  "target_column": "species",
+  "problem_type": "classification",
+  "numerical_columns": [
+    "sepal length (cm)",
+    "sepal width (cm)",
+    "petal length (cm)",
+    "petal width (cm)"
+  ],
+  "categorical_columns": [],
+  "missing_value_ratio": 0.0,
+  "class_distribution": {
+    "setosa": 50,
+    "versicolor": 50,
+    "virginica": 50
+  },
+  "feature_summary": [
+    {
+      "name": "sepal length (cm)",
+      "dtype": "float64",
+      "unique_values": 35,
+      "missing_percentage": 0.0,
+      "distribution": "unknown"
+    },
+    {
+      "name": "sepal width (cm)",
+      "dtype": "float64",
+      "unique_values": 23,
+      "missing_percentage": 0.0,
+      "distribution": "normal"
+    },
+    {
+      "name": "petal length (cm)",
+      "dtype": "float64",
+      "unique_values": 43,
+      "missing_percentage": 0.0,
+      "distribution": "uniform"
+    },
+    {
+      "name": "petal width (cm)",
+      "dtype": "float64",
+      "unique_values": 22,
+      "missing_percentage": 0.0,
+      "distribution": "uniform"
+    }
+  ],
+  "recommended_metrics": [
+    "accuracy",
+    "f1_score"
+  ]
+}
