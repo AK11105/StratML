@@ -97,12 +97,12 @@ ActionDecision = {
     # IDENTIFICATION
     # =========================
     "experiment_id": str,
+    "iteration": int,   # ✅ NEW (important for distinguishing iteration 0)
 
     # =========================
     # ACTION
     # =========================
     "action_type": str,
-
     "parameters": dict,
 
     # =========================
@@ -117,19 +117,27 @@ ActionDecision = {
     },
 
     # =========================
+    # BOOTSTRAP CONTEXT (ONLY ITERATION 0)
+    # =========================
+    "bootstrap_context": {   # ✅ NEW (OPTIONAL)
+        "source": str,       # "dataprofile"
+        "strategy": str      # e.g. "tree_baseline", "linear_baseline"
+    } | None,
+
+    # =========================
     # DECISION INTELLIGENCE
     # =========================
-    "expected_gain": float,
+    "expected_gain": float | None,   # ⚠️ now optional for iteration 0
     "expected_cost": float,
-    "confidence": float,
+    "confidence": float | None,      # ⚠️ optional for iteration 0
 
     # =========================
     # MULTI-AGENT SCORES
     # =========================
     "agent_scores": {
-        "performance": float,
-        "efficiency": float,
-        "stability": float
+        "performance": float | None,
+        "efficiency": float | None,
+        "stability": float | None
     },
 
     # =========================
@@ -137,7 +145,8 @@ ActionDecision = {
     # =========================
     "reason": {
         "trigger": str,
-        "evidence": dict
+        "evidence": dict,
+        "source": str   # ✅ NEW → "bootstrap" | "learned"
     }
 }
 ```
