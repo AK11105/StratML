@@ -1,0 +1,18 @@
+mode: beginner
+dataset:
+  path: null
+  target_column: null
+execution:
+  max_iterations: 5
+  timeout_per_run: 300
+  random_seed: 42
+split:
+  method: stratified
+  test_size: 0.2
+logging:
+  enable_mlflow: false
+  enable_tensorboard: false
+  log_level: info
+constraints:
+  max_memory: null
+  max_cpu: null

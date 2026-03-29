@@ -1,34 +1,101 @@
-# StratML Commands
+# StratML CLI Commands
 
 ---
 
-## *To initialise a project* #
+## init
 
-    stratml init 
+Create a default `config.yaml` in the current directory.
 
-## *To validate the config file* #
+```bash
+stratml init
+```
 
-    stratml validate-config <path_to_config_file>
+Edit `dataset.path` and `dataset.target_column` before running anything else.
 
-## *To profile data* #
+---
 
-    stratml profile-data --input <dataset> 
+## validate-config
 
-## *To validate enviroment* #
+Check that a config file is valid before running.
 
-    stratml doctor
+```bash
+stratml validate-config <config>
+```
 
-## *To run exec pipeline* #
+Example:
 
-    stratml run --config <path_to_config_file>
+```bash
+stratml validate-config config.yaml
+```
 
-**Optional parameters :-**
+---
 
-    --path <path_to_dataset>
-    --mode <beginner|intemediate|expert>
-    --max-iter <number_of_iterations_cap>
-    --dry-run 
+## profile-data
 
+Load a dataset, compute a DataProfile, and print a summary to the terminal.
+Saves full JSON output to `outputs/<dataset_name>/data_profile.json`.
 
+```bash
+stratml profile-data <dataset> <target>
+```
 
+Example:
 
+```bash
+stratml profile-data data/iris.csv species
+```
+
+---
+
+## run
+
+Run the AutoML pipeline using a config file.
+
+```bash
+stratml run <config> [options]
+```
+
+Example:
+
+```bash
+stratml run config.yaml
+```
+
+Optional flags:
+
+```
+--path <dataset>               override dataset path from config
+--mode <beginner|intermediate|expert>
+--max-iter <n>                 override max iterations
+--dry-run                      print resolved config without running
+```
+
+Dry run example:
+
+```bash
+stratml run config.yaml --dry-run
+```
+
+---
+
+## doctor
+
+Check that all required packages are installed.
+
+```bash
+stratml doctor
+```
+
+---
+
+## Argument Style
+
+All commands use **positional arguments** — no `--input` or `--config` flags needed.
+
+| Command | Positional args |
+|---|---|
+| `run` | `config` |
+| `validate-config` | `config` |
+| `profile-data` | `dataset`, `target` |
+| `init` | none |
+| `doctor` | none |
