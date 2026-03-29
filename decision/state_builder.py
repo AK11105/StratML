@@ -1,32 +1,21 @@
 """
 state_builder.py
 ----------------
-Phase 1 (Dev B) — State Pipeline: convert ExperimentResult → StateObject.
+Dev B — State Pipeline orchestrator.
 
-Responsibilities:
-- Extract base metrics from ExperimentResult
-- Compute improvement_rate against the previous experiment (if any)
-- Derive train/validation gap (generalization proxy)
-- Populate dataset state from ExperimentResult.dataset_snapshot fields
-- Populate model context
-- Populate resource state
-- Maintain a minimal search history (models tried, repeated configs)
-- Compute rule-based signals (underfitting, overfitting, convergence, etc.)
-- Return a fully populated StateObject
+Two public entry points:
 
-What this module does NOT do (Phase 2+):
-- Trajectory slope / volatility over N experiments  → state_history.py
-- Dataset meta-features (entropy, variance)         → meta_features.py
-- Rich signal extraction                            → signals.py
+    build_state_from_profile(profile, history)
+        Iteration 0.  No ExperimentResult yet.  Builds a bootstrap
+        StateObject from DataProfile + meta_features.
 
-Those fields are pre-populated with safe defaults so the StateObject
-contract is always valid and Dev A can consume it immediately.
-
-Input:
-    ExperimentResult
-
-Output:
-    StateObject
+    build_state(result, history, profile)
+        Iteration 1+.  Full pipeline:
+            ExperimentResult
+                → state_history  (trajectory features)
+                → meta_features  (dataset features, if profile provided)
+                → signals        (trajectory-aware signal extraction)
+                → StateObject
 """
 
 from __future__ import annotations
@@ -34,8 +23,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
+from execution.schemas import DataProfile, ExperimentResult
 from core.schemas import (
-    ExperimentResult,
     StateObject,
     StateMeta,
     StateObjective,
@@ -52,16 +41,131 @@ from core.schemas import (
     StateActionContext,
     StateConstraints,
 )
+from decision.state_history import ExperimentHistory
+from decision.meta_features import extract as extract_meta
+from decision.signals import compute_signals
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
+def build_state_from_profile(
+    profile: DataProfile,
+    *,
+    primary_metric: str = "accuracy",
+    optimization_goal: str = "maximize",
+    allowed_models: Optional[list[str]] = None,
+    max_iterations: int = 20,
+    time_budget: Optional[float] = None,
+) -> StateObject:
+    """
+    Iteration 0 entry point.
+
+    Called when Team A sends a DataProfile and no ExperimentResult exists yet.
+    Produces a bootstrap StateObject so Dev A can generate the very first
+    ActionDecision (model selection + preprocessing plan).
+
+    Metrics, trajectory, generalization, and signals are all zeroed/defaulted
+    because no experiment has run yet.  Dev A must check
+    ``state.meta.iteration == 0`` to know this is a bootstrap state.
+
+    Args:
+        profile:           DataProfile received from Team A.
+        primary_metric:    Optimisation target (e.g. "accuracy", "r2").
+        optimization_goal: "maximize" or "minimize".
+        allowed_models:    Model whitelist from CLI config.
+        max_iterations:    Hard cap from CLI config.
+        time_budget:       Wall-clock budget in seconds (optional).
+
+    Returns:
+        A StateObject with iteration=0 and dataset fields populated from
+        the DataProfile.  All metric/trajectory fields are zero.
+    """
+    num_samples = profile.rows
+    num_features = profile.columns - 1  # exclude target column
+
+    class_dist = dict(profile.class_distribution) if profile.class_distribution else None
+    imbalance_ratio: Optional[float] = None
+    if class_dist and len(class_dist) >= 2:
+        counts = list(class_dist.values())
+        imbalance_ratio = round(max(counts) / max(min(counts), 1), 4)
+
+    return StateObject(
+        meta=StateMeta(
+            experiment_id="bootstrap",
+            iteration=0,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        ),
+        objective=StateObjective(
+            primary_metric=primary_metric,
+            optimization_goal=optimization_goal,
+        ),
+        metrics=StateMetrics(
+            primary=0.0,
+            secondary=SecondaryMetrics(),
+            train_val_gap=0.0,
+        ),
+        trajectory=StateTrajectory(
+            history_length=0,
+            improvement_rate=0.0,
+            slope=0.0,
+            volatility=0.0,
+            best_score=0.0,
+            mean_score=0.0,
+            steps_since_improvement=0,
+            trend="stagnating",
+        ),
+        dataset=StateDataset(
+            num_samples=num_samples,
+            num_features=num_features,
+            feature_to_sample_ratio=round(num_features / max(num_samples, 1), 6),
+            missing_ratio=profile.missing_value_ratio,
+            class_distribution=class_dist,
+            imbalance_ratio=imbalance_ratio,
+        ),
+        model=StateModel(
+            model_name="none",
+            model_type="ml",
+            hyperparameters={},
+            complexity_hint=None,
+            runtime=0.0,
+            convergence_epoch=0,
+            early_stopped=None,
+        ),
+        generalization=StateGeneralization(
+            train_loss=0.0,
+            validation_loss=0.0,
+            gap=0.0,
+        ),
+        resources=StateResources(
+            runtime=0.0,
+            gpu_used=False,
+            cpu_time=0.0,
+            remaining_budget=float(max_iterations),
+            budget_exhausted=False,
+        ),
+        search=StateSearch(
+            models_tried=[],
+            unique_models_count=0,
+            repeated_configs=0,
+        ),
+        signals=StateSignals(),   # all False — no experiment has run yet
+        uncertainty=StateUncertainty(),
+        action_context=StateActionContext(),
+        constraints=StateConstraints(
+            allowed_models=allowed_models or [],
+            max_iterations=max_iterations,
+            time_budget=time_budget,
+        ),
+    )
+
+
 def build_state(
     result: ExperimentResult,
     *,
-    previous_result: Optional[ExperimentResult] = None,
+    history: Optional[ExperimentHistory] = None,
+    profile: Optional[DataProfile] = None,
     primary_metric: str = "accuracy",
     optimization_goal: str = "maximize",
     allowed_models: Optional[list[str]] = None,
@@ -74,34 +178,62 @@ def build_state(
     remaining_budget: Optional[float] = None,
 ) -> StateObject:
     """
-    Convert an ExperimentResult into a StateObject.
+    Convert an ExperimentResult into a fully populated StateObject.
+
+    Pipeline:
+        1. Push result into history buffer (state_history)
+        2. Compute trajectory features from history
+        3. Extract dataset meta-features from DataProfile (if provided)
+        4. Assemble StateObject
+        5. Compute trajectory-aware signals (signals.py)
 
     Args:
-        result:                  The latest ExperimentResult from Team A.
-        previous_result:         The immediately preceding ExperimentResult,
-                                 used to compute improvement_rate.
-        primary_metric:          Which metric to treat as the optimisation
-                                 target (e.g. "accuracy", "f1_score", "r2").
-        optimization_goal:       "maximize" or "minimize".
-        allowed_models:          Model whitelist from CLI config.
-        max_iterations:          Hard cap from CLI config.
-        time_budget:             Wall-clock budget in seconds (optional).
-        previous_action:         action_type from the last ActionDecision.
-        previous_action_success: Whether the previous action improved the
-                                 primary metric.
-        models_tried:            Cumulative list of model names run so far
-                                 (including this result).
-        repeated_configs:        Count of iterations that reused an identical
-                                 (model, hyperparameters) pair.
-        remaining_budget:        Remaining iteration budget (optional).
+        result:          Latest ExperimentResult from Team A.
+        history:         ExperimentHistory instance (shared across iterations).
+                         If None, a single-experiment history is used.
+        profile:         DataProfile from Team A (used to populate dataset
+                         meta-features).  Optional — defaults to zeros.
+        primary_metric:  Optimisation target metric name.
+        optimization_goal: "maximize" or "minimize".
+        allowed_models:  Model whitelist from CLI config.
+        max_iterations:  Hard cap from CLI config.
+        time_budget:     Wall-clock budget in seconds (optional).
+        previous_action: action_type from the last ActionDecision.
+        previous_action_success: Whether the previous action improved the metric.
+        models_tried:    Cumulative list of model names run so far.
+        repeated_configs: Count of identical (model, hyperparameters) reuses.
+        remaining_budget: Remaining iteration budget (optional).
 
     Returns:
         A fully populated StateObject ready for Dev A's decision engine.
     """
-    primary_value = _extract_primary(result, primary_metric)
-    prev_primary = _extract_primary(previous_result, primary_metric) if previous_result else None
+    # --- 1. trajectory ---
+    if history is None:
+        history = ExperimentHistory()
+    history.push(result)
+    traj = history.compute_trajectory(primary_metric)
 
-    improvement_rate = _compute_improvement(primary_value, prev_primary, optimization_goal)
+    # adjust improvement_rate sign for "minimize" goals
+    improvement_rate = traj.improvement_rate
+    if optimization_goal == "minimize":
+        improvement_rate = -improvement_rate
+
+    # --- 2. dataset meta-features ---
+    if profile is not None:
+        meta = extract_meta(profile)
+        num_samples = meta.num_samples
+        num_features = meta.num_features
+        fsr = meta.feature_sample_ratio
+        missing_ratio = meta.missing_value_ratio
+        class_dist = dict(profile.class_distribution) if profile.class_distribution else None
+        imbalance_ratio = meta.imbalance_ratio
+    else:
+        num_samples = 0
+        num_features = 0
+        fsr = 0.0
+        missing_ratio = 0.0
+        class_dist = None
+        imbalance_ratio = None
 
     train_loss = result.metrics.train_loss or 0.0
     val_loss = result.metrics.validation_loss or 0.0
@@ -111,15 +243,8 @@ def build_state(
     if result.model_name not in models_tried:
         models_tried.append(result.model_name)
 
-    signals = _compute_signals(
-        primary_value=primary_value,
-        train_loss=train_loss,
-        val_loss=val_loss,
-        improvement_rate=improvement_rate,
-        runtime=result.runtime,
-    )
-
-    return StateObject(
+    # --- 3. assemble StateObject (signals computed after) ---
+    state = StateObject(
         meta=StateMeta(
             experiment_id=result.experiment_id,
             iteration=result.iteration,
@@ -130,7 +255,7 @@ def build_state(
             optimization_goal=optimization_goal,
         ),
         metrics=StateMetrics(
-            primary=primary_value,
+            primary=traj.best_score if optimization_goal == "maximize" else traj.mean_score,
             secondary=SecondaryMetrics(
                 accuracy=result.metrics.accuracy,
                 precision=result.metrics.precision,
@@ -143,24 +268,22 @@ def build_state(
             train_val_gap=gap,
         ),
         trajectory=StateTrajectory(
-            history_length=1 if previous_result is None else 2,
+            history_length=traj.history_length,
             improvement_rate=improvement_rate,
-            slope=improvement_rate,          # refined by state_history.py (Phase 2)
-            volatility=0.0,                  # refined by state_history.py (Phase 2)
-            best_score=primary_value,        # refined by state_history.py (Phase 2)
-            mean_score=primary_value,        # refined by state_history.py (Phase 2)
-            steps_since_improvement=0 if improvement_rate > 0 else 1,
-            trend=_infer_trend(improvement_rate),
+            slope=traj.slope,
+            volatility=traj.volatility,
+            best_score=traj.best_score,
+            mean_score=traj.mean_score,
+            steps_since_improvement=traj.steps_since_improvement,
+            trend=traj.trend,
         ),
         dataset=StateDataset(
-            num_samples=result.metrics.accuracy and _safe_int(
-                getattr(result, "dataset_snapshot", {})
-            ) or 0,
-            num_features=0,                  # injected by meta_features.py (Phase 3)
-            feature_to_sample_ratio=0.0,     # injected by meta_features.py (Phase 3)
-            missing_ratio=0.0,               # injected by meta_features.py (Phase 3)
-            class_distribution=None,
-            imbalance_ratio=None,
+            num_samples=num_samples,
+            num_features=num_features,
+            feature_to_sample_ratio=fsr,
+            missing_ratio=missing_ratio,
+            class_distribution=class_dist,
+            imbalance_ratio=imbalance_ratio,
         ),
         model=StateModel(
             model_name=result.model_name,
@@ -188,7 +311,7 @@ def build_state(
             unique_models_count=len(set(models_tried)),
             repeated_configs=repeated_configs,
         ),
-        signals=signals,
+        signals=StateSignals(),   # placeholder — overwritten below
         uncertainty=StateUncertainty(),
         action_context=StateActionContext(
             previous_action=previous_action,
@@ -202,48 +325,19 @@ def build_state(
         ),
     )
 
+    # --- 4. trajectory-aware signals ---
+    state.signals = compute_signals(state)
+    return state
+
 
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _extract_primary(result: Optional[ExperimentResult], metric: str) -> float:
-    """Pull the primary metric value from an ExperimentResult. Returns 0.0 if absent."""
-    if result is None:
-        return 0.0
-    return float(getattr(result.metrics, metric, None) or 0.0)
-
-
-def _compute_improvement(current: float, previous: Optional[float], goal: str) -> float:
-    """
-    Signed improvement rate.
-
-    For "maximize": positive means better.
-    For "minimize":  negative delta means better, so we negate.
-    """
-    if previous is None:
-        return 0.0
-    delta = current - previous
-    return round(delta if goal == "maximize" else -delta, 6)
-
-
-def _infer_trend(improvement_rate: float) -> str:
-    if improvement_rate > 0.001:
-        return "improving"
-    if improvement_rate < -0.001:
-        return "degrading"
-    return "stagnating"
-
-
 def _infer_complexity(hyperparameters: dict) -> Optional[str]:
-    """
-    Heuristic complexity hint derived from common hyperparameter names.
-    Returns None when no recognisable parameters are present.
-    """
     n = hyperparameters.get("n_estimators") or hyperparameters.get("hidden_units") or 0
     layers = hyperparameters.get("num_layers") or hyperparameters.get("layers") or 1
     depth = hyperparameters.get("max_depth") or 0
-
     score = int(n) // 100 + int(layers) + int(depth) // 5
     if score == 0:
         return None
@@ -252,57 +346,3 @@ def _infer_complexity(hyperparameters: dict) -> Optional[str]:
     if score <= 5:
         return "medium"
     return "high"
-
-
-def _compute_signals(
-    *,
-    primary_value: float,
-    train_loss: float,
-    val_loss: float,
-    improvement_rate: float,
-    runtime: float,
-) -> StateSignals:
-    """
-    Rule-based signal extraction for Phase 1.
-
-    Thresholds are intentionally conservative — Phase 2 (signals.py) will
-    refine these with trajectory context.
-    """
-    gap = val_loss - train_loss
-
-    underfitting = primary_value < 0.60
-    overfitting = gap > 0.10
-    well_fitted = not underfitting and not overfitting and primary_value >= 0.75
-
-    converged = abs(improvement_rate) < 0.001 and primary_value >= 0.75
-    stagnating = abs(improvement_rate) < 0.001 and not converged
-    diverging = improvement_rate < -0.05
-
-    unstable_training = val_loss > train_loss * 2.0 and train_loss > 0
-    high_variance = gap > 0.20
-
-    too_slow = runtime > 300.0
-
-    plateau_detected = stagnating
-    diminishing_returns = 0.0 < improvement_rate < 0.005
-
-    return StateSignals(
-        underfitting=underfitting,
-        overfitting=overfitting,
-        well_fitted=well_fitted,
-        converged=converged,
-        stagnating=stagnating,
-        diverging=diverging,
-        unstable_training=unstable_training,
-        high_variance=high_variance,
-        too_slow=too_slow,
-        plateau_detected=plateau_detected,
-        diminishing_returns=diminishing_returns,
-    )
-
-
-def _safe_int(obj: object) -> int:
-    """Safely extract an integer from an object that may be a dict or missing."""
-    if isinstance(obj, dict):
-        return int(obj.get("num_samples", 0))
-    return 0
