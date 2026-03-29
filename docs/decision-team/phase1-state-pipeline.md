@@ -1,161 +1,175 @@
-# Dev B — State Pipeline: Phase 1 Implementation
+# Dev B — State Pipeline: Full Baseline Implementation
 
 ## Overview
 
-This document covers the **Phase 1** deliverables for **Dev B (State Pipeline)** on the Decision Team.
+This document covers the complete **rule-based baseline** for Dev B's responsibilities.
+All five files are implemented and wired together.
 
-Phase 1 establishes the working rule-based loop:
+---
+
+## File Responsibilities
+
+| File | Phase | Input | Output |
+|---|---|---|---|
+| `core/schemas.py` | 1 | — | All shared contracts (frozen) |
+| `decision/state_builder.py` | 1 | ExperimentResult / DataProfile | StateObject |
+| `decision/state_history.py` | 2 | ExperimentResult buffer | TrajectoryFeatures |
+| `decision/meta_features.py` | 3 | DataProfile | DatasetMetaFeatures |
+| `decision/signals.py` | 2 | StateObject | StateSignals |
+
+---
+
+## Full Pipeline
 
 ```
-ExperimentResult  →  StateObject  →  ActionDecision  (Dev A consumes)
+Iteration 0 (no experiment yet):
+    DataProfile
+        → build_state_from_profile()
+        → meta_features.extract()       (num_features, entropy, imbalance)
+        → StateObject  [iteration=0, all metrics=0, all signals=False]
+
+Iteration 1+ (after each training run):
+    ExperimentResult
+        → state_history.push() + compute_trajectory()
+              slope, volatility, best_score, mean_score,
+              steps_since_improvement, runtime_trend
+        → meta_features.extract()       (if DataProfile provided)
+        → StateObject assembled
+        → signals.compute_signals()     (trajectory-aware)
+        → StateObject  [fully populated]
 ```
 
 ---
 
-## Deliverables
+## state_history.py
 
-| File | Responsibility |
+Maintains a rolling buffer of the last 3 `ExperimentResult` objects.
+
+### Computed features
+
+| Feature | Formula |
 |---|---|
-| `core/schemas.py` | All shared contracts (ExperimentResult, StateObject, ActionDecision, …) |
-| `decision/state_builder.py` | Converts ExperimentResult → StateObject |
-| `decision/run_state_builder.py` | CLI runner for manual testing |
+| `improvement_rate` | `score_t − score_t-1` |
+| `slope` | `(score_t − score_0) / (n − 1)` over window |
+| `loss_slope` | same formula applied to validation_loss |
+| `volatility` | `stdev(scores)` over window |
+| `best_score` | `max(scores)` in buffer |
+| `mean_score` | `mean(scores)` in buffer |
+| `steps_since_improvement` | iterations without a new best score |
+| `runtime_trend` | `runtime_t − runtime_t-1` |
+| `model_switch_frequency` | count of model name changes in window |
+| `trend` | `improving` / `stagnating` / `degrading` based on slope |
 
----
+### Usage
 
-## Folder Structure After Phase 1
+```python
+from decision.state_history import ExperimentHistory
 
-```
-StratML/
-│
-├── core/
-│   ├── __init__.py
-│   └── schemas.py              ← ALL shared contracts (frozen after Phase 1)
-│
-├── decision/
-│   ├── __init__.py
-│   ├── state_builder.py        ← Phase 1: ExperimentResult → StateObject
-│   ├── run_state_builder.py    ← Phase 1: CLI runner
-│   │
-│   ├── state_history.py        ← Phase 2 (trajectory features)
-│   ├── meta_features.py        ← Phase 3 (dataset meta-features)
-│   ├── signals.py              ← Phase 2 (rich signal extraction)
-│   ├── action_generator.py     ← Dev A Phase 1
-│   ├── policy_selector.py      ← Dev A Phase 1
-│   ├── logger.py               ← Dev A later
-│   │
-│   ├── agents/
-│   │   ├── performance_agent.py
-│   │   ├── efficiency_agent.py
-│   │   ├── stability_agent.py
-│   │   └── coordinator_agent.py
-│   │
-│   ├── learning/
-│   │   ├── dataset_builder.py
-│   │   ├── value_model.py
-│   │   ├── uncertainty.py
-│   │   └── calibration.py
-│   │
-│   └── validation/
-│       └── counterfactual.py
-│
-└── outputs/
-    └── <dataset_name>/
-        ├── data_profile.json   ← Team A output
-        └── state_object.json   ← Team B Phase 1 output
+history = ExperimentHistory()   # create once, share across iterations
+history.push(result)
+features = history.compute_trajectory(primary_metric="accuracy")
 ```
 
 ---
 
-## Phase 1 Scope
+## meta_features.py
 
-Phase 1 produces a **fully valid StateObject** from a single ExperimentResult.
+Computes dataset-level characteristics from a `DataProfile`. Called once per dataset (or per iteration if profile is passed to `build_state`).
 
-Fields populated in Phase 1:
+### Computed features
 
-| Section | Fields | Source |
-|---|---|---|
-| `meta` | experiment_id, iteration, timestamp | ExperimentResult |
-| `objective` | primary_metric, optimization_goal | CLI config |
-| `metrics` | primary, secondary, train_val_gap | ExperimentResult.metrics |
-| `trajectory` | improvement_rate, trend, history_length | ExperimentResult + previous |
-| `model` | model_name, model_type, hyperparameters, complexity_hint, runtime | ExperimentResult |
-| `generalization` | train_loss, validation_loss, gap | ExperimentResult.metrics |
-| `resources` | runtime, gpu_used, cpu_time, budget_exhausted | ExperimentResult.resource_usage |
-| `search` | models_tried, unique_models_count, repeated_configs | Caller-maintained list |
-| `signals` | underfitting, overfitting, well_fitted, converged, stagnating, … | Rule-based (Phase 1) |
-
-Fields left as safe defaults for later phases:
-
-| Field | Populated by |
+| Feature | Formula |
 |---|---|
-| `trajectory.slope`, `volatility`, `best_score`, `mean_score` | `state_history.py` (Phase 2) |
-| `dataset.num_features`, `feature_to_sample_ratio`, `missing_ratio` | `meta_features.py` (Phase 3) |
-| `uncertainty.prediction_variance`, `confidence` | `learning/uncertainty.py` (Phase 4) |
+| `num_samples` | `DataProfile.rows` |
+| `num_features` | `DataProfile.columns − 1` (exclude target) |
+| `feature_sample_ratio` | `num_features / num_samples` |
+| `class_entropy` | `−Σ p·log₂(p)` over class distribution |
+| `missing_value_ratio` | `DataProfile.missing_value_ratio` |
+| `feature_variance_mean` | mean unique-value count across features (proxy) |
+| `imbalance_ratio` | `max_class_count / min_class_count` |
+
+### Usage
+
+```python
+from decision.meta_features import extract
+
+features = extract(profile)
+# features.class_entropy, features.imbalance_ratio, etc.
+```
 
 ---
 
-## Signal Rules (Phase 1)
+## signals.py
 
-All signals are derived deterministically from the current ExperimentResult.
+Converts a `StateObject` (with trajectory context) into a fully populated `StateSignals` block. Uses slope and `steps_since_improvement` rather than single-step improvement rate.
+
+### Signal rules
 
 | Signal | Rule |
 |---|---|
-| `underfitting` | `primary_metric < 0.60` |
+| `underfitting` | `primary < 0.60` |
 | `overfitting` | `val_loss − train_loss > 0.10` |
-| `well_fitted` | not underfitting AND not overfitting AND primary ≥ 0.75 |
-| `converged` | `\|improvement_rate\| < 0.001` AND primary ≥ 0.75 |
-| `stagnating` | `\|improvement_rate\| < 0.001` AND not converged |
-| `diverging` | `improvement_rate < −0.05` |
+| `well_fitted` | not under/over AND `primary ≥ 0.75` |
+| `converged` | `\|slope\| < 0.001` AND `primary ≥ 0.75` |
+| `stagnating` | `steps_since_improvement ≥ 2` AND not converged |
+| `diverging` | `slope < −0.02` |
 | `unstable_training` | `val_loss > train_loss × 2.0` |
-| `high_variance` | `gap > 0.20` |
+| `high_variance` | `volatility > 0.05` |
 | `too_slow` | `runtime > 300s` |
-| `plateau_detected` | same as stagnating |
+| `plateau_detected` | `steps_since_improvement ≥ 3` |
 | `diminishing_returns` | `0 < improvement_rate < 0.005` |
 
-These thresholds are intentionally conservative. Phase 2 (`signals.py`) will refine them using trajectory context.
-
----
-
-## Improvement Rate
-
-```
-improvement_rate = current_primary − previous_primary   (maximize)
-improvement_rate = previous_primary − current_primary   (minimize)
-```
-
-On iteration 0 (no previous result), `improvement_rate = 0.0`.
-
----
-
-## Usage
-
-### Run the state builder manually
-
-```bash
-# First iteration
-python3 decision/run_state_builder.py outputs/iris/experiment_result.json
-
-# Subsequent iteration (pass previous result for improvement_rate)
-python3 decision/run_state_builder.py outputs/iris/experiment_result_2.json \
-                                      outputs/iris/experiment_result_1.json
-```
-
-### Use in code
+### Usage
 
 ```python
-from core.schemas import ExperimentResult
-from decision.state_builder import build_state
+from decision.signals import compute_signals
 
-state = build_state(
-    result,
-    previous_result=previous,
+signals = compute_signals(state)   # called automatically inside build_state()
+```
+
+---
+
+## state_builder.py — Updated API
+
+### Iteration 0
+
+```python
+from decision.state_builder import build_state_from_profile
+
+state = build_state_from_profile(
+    profile,
     primary_metric="accuracy",
     optimization_goal="maximize",
     allowed_models=["RandomForest", "XGBoost"],
     max_iterations=20,
-    models_tried=["LogisticRegression", "RandomForest"],
 )
-# state is a fully validated StateObject — pass to Dev A's action_generator
+# state.meta.iteration == 0
+# state.meta.experiment_id == "bootstrap"
+# state.dataset populated from DataProfile
+# all signals False, all metrics 0.0
+```
+
+### Iteration 1+
+
+```python
+from decision.state_builder import build_state
+from decision.state_history import ExperimentHistory
+
+history = ExperimentHistory()   # shared across all iterations
+
+state = build_state(
+    result,
+    history=history,
+    profile=profile,            # optional, populates dataset fields
+    primary_metric="accuracy",
+    optimization_goal="maximize",
+    allowed_models=["RandomForest", "XGBoost"],
+    max_iterations=20,
+    previous_action="switch_model",
+    previous_action_success=True,
+    models_tried=["LogisticRegression", "RandomForest"],
+    remaining_budget=18.0,
+)
 ```
 
 ---
@@ -163,20 +177,22 @@ state = build_state(
 ## Integration Point with Dev A
 
 ```
-Dev B produces:   StateObject
-Dev A consumes:   StateObject  →  [CandidateAction, ...]  →  ActionDecision
+Dev B produces:   StateObject   (via build_state or build_state_from_profile)
+Dev A consumes:   StateObject   → CandidateAction list → ActionDecision
 ```
 
-Dev A's `action_generator.py` receives the `StateObject` and reads `state.signals` to generate candidate actions.
+Dev A reads:
+- `state.signals` — to generate candidate actions
+- `state.trajectory` — to assess momentum
+- `state.constraints` — to filter allowed actions
+- `state.resources` — to check budget
 
 ---
 
-## What Comes Next
+## What Comes Next (Later Phases)
 
-| Phase | File | Owner |
+| Phase | File | Replaces |
 |---|---|---|
-| Phase 2 | `decision/state_history.py` | Dev B |
-| Phase 2 | `decision/signals.py` | Dev B |
-| Phase 3 | `decision/meta_features.py` | Dev B |
-| Phase 1 | `decision/action_generator.py` | Dev A |
-| Phase 1 | `decision/policy_selector.py` | Dev A |
+| 4 | `learning/value_model.py` | rule thresholds in `signals.py` |
+| 4 | `learning/uncertainty.py` | `state.uncertainty` defaults (None) |
+| 4 | `agents/` | binary signals → scored evaluations |
