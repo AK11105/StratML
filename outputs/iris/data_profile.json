@@ -2,10 +2,11 @@
   "dataset_name": "iris",
   "dataset_type": "tabular",
   "rows": 150,
-  "columns": 5,
+  "columns": 6,
   "target_column": "species",
   "problem_type": "classification",
   "numerical_columns": [
+    "Unnamed: 0",
     "sepal length (cm)",
     "sepal width (cm)",
     "petal length (cm)",
@@ -14,11 +15,18 @@
   "categorical_columns": [],
   "missing_value_ratio": 0.0,
   "class_distribution": {
-    "setosa": 50,
-    "versicolor": 50,
-    "virginica": 50
+    "0": 50,
+    "1": 50,
+    "2": 50
   },
   "feature_summary": [
+    {
+      "name": "Unnamed: 0",
+      "dtype": "int64",
+      "unique_values": 150,
+      "missing_percentage": 0.0,
+      "distribution": "uniform"
+    },
     {
       "name": "sepal length (cm)",
       "dtype": "float64",

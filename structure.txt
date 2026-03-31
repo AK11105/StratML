@@ -1,0 +1,126 @@
+multi-agent-auto-ml/
+│
+├── pyproject.toml
+├── README.md
+├── .gitignore
+├── .python-version
+├── uv.lock
+│
+# =========================
+# 📦 MAIN PACKAGE
+# =========================
+├── stratml/
+│   ├── __init__.py
+│
+│   # CLI
+│   ├── cli/
+│   │   ├── main.py
+│   │   └── commands/
+│   │       ├── run.py
+│   │       ├── inspect.py
+│   │       └── resume.py
+│
+│   # CORE CONTRACTS
+│   ├── core/
+│   │   ├── schemas.py
+│   │   ├── types.py
+│   │   └── __init__.py
+│
+│   # EXECUTION (Team A)
+│   ├── execution/
+│   │   ├── data/
+│   │   │   ├── loader.py
+│   │   │   ├── validator.py
+│   │   │   └── profiler.py
+│   │
+│   │   ├── preprocessing/
+│   │   ├── pipelines/
+│   │   ├── training/
+│   │   ├── metrics/
+│   │   ├── artifacts/
+│   │
+│   │   ├── runner.py
+│   │   └── translator.py
+│
+│   # DECISION (Team B)
+│   ├── decision/
+│   │   ├── state/
+│   │   │   ├── state_builder.py
+│   │   │   ├── state_history.py
+│   │   │   ├── meta_features.py
+│   │   │   └── signals.py
+│   │
+│   │   ├── actions/
+│   │   ├── learning/
+│   │   ├── agents/
+│   │   ├── policy/
+│   │   ├── logging/
+│   │   ├── validation/
+│   │
+│   │   ├── agent.py
+│   │   └── bootstrap.py
+│
+│   # ORCHESTRATION
+│   ├── orchestration/
+│   │   ├── orchestrator.py
+│   │   ├── lifecycle.py
+│   │   └── budget.py
+│
+│   # OBSERVABILITY
+│   ├── observability/
+│   │   ├── mlflow_logger.py
+│   │   ├── tensorboard.py
+│   │   └── langsmith.py
+│
+│   # UTILITIES
+│   ├── utils/
+│   │   ├── config.py
+│   │   ├── registry.py
+│   │   └── logging.py
+│
+│   # CONFIGS (PACKAGE DEFAULTS)
+│   ├── configs/
+│       └── default.yaml
+│
+# =========================
+# 📊 USER DATA (IMPORTANT)
+# =========================
+├── data/
+│   ├── raw/              # downloaded datasets
+│   ├── processed/        # cached cleaned datasets
+│   └── external/         # optional
+│
+# =========================
+# 📈 RUN OUTPUTS
+# =========================
+├── runs/
+│   ├── experiments/
+│   ├── decision_logs/
+│   └── tensorboard/
+│
+├── artifacts/
+│   └── models/
+│
+# =========================
+# 📚 DOCUMENTATION
+# =========================
+├── docs/
+│   ├── architecture/
+│   ├── decision/
+│   ├── execution/
+│   └── cli/
+│
+# =========================
+# 🧪 TESTING
+# =========================
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── e2e/
+│
+# =========================
+# ⚙️ DEV SCRIPTS
+# =========================
+├── scripts/
+│   ├── dev_run.sh
+│   └── setup_env.sh
