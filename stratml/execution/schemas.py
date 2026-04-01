@@ -6,6 +6,7 @@ Pydantic models for all data structures used by the Execution team.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -104,3 +105,31 @@ class ActionDecision(BaseModel):
     expected_gain: float
     expected_cost: float
     confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+class SplitConfig(BaseModel):
+    method: str = Field(..., pattern="^(stratified|random)$")
+    test_size: float = 0.2
+    val_size: float = 0.1
+    random_seed: int = 42
+
+
+class ExperimentConfig(BaseModel):
+    experiment_id: str
+    model_name: str
+    model_type: str = Field(..., pattern="^(ml|dl)$")
+    hyperparameters: dict
+    preprocessing: PreprocessingConfig
+    early_stopping: bool = False
+    early_stopping_patience: int = 5
+
+
+@dataclass
+class DataSplit:
+    """Internal train/val/test split. Never crosses the Team A/B boundary."""
+    X_train: pd.DataFrame
+    X_val: pd.DataFrame
+    X_test: pd.DataFrame
+    y_train: pd.Series
+    y_val: pd.Series
+    y_test: pd.Series
