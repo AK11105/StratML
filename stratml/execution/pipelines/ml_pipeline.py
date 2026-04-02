@@ -6,24 +6,59 @@ Phase 5 — Train a scikit-learn model and return raw predictions + timing.
 
 from __future__ import annotations
 
+import inspect
 import time
 from dataclasses import dataclass
 
 import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.ensemble import (
+    GradientBoostingClassifier, GradientBoostingRegressor,
+    RandomForestClassifier, RandomForestRegressor,
+    ExtraTreesClassifier, ExtraTreesRegressor,
+    AdaBoostClassifier, AdaBoostRegressor,
+)
+from sklearn.linear_model import (
+    LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet,
+    SGDClassifier, SGDRegressor,
+)
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.svm import SVC, SVR
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from stratml.execution.schemas import ExperimentConfig, DataSplit
 
 MODEL_REGISTRY: dict = {
-    "LogisticRegression": LogisticRegression,
-    "RandomForestClassifier": RandomForestClassifier,
-    "RandomForestRegressor": RandomForestRegressor,
+    # ── Linear ────────────────────────────────────────────────────────────────
+    "LogisticRegression":       LogisticRegression,
+    "LinearRegression":         LinearRegression,
+    "Ridge":                    Ridge,
+    "Lasso":                    Lasso,
+    "ElasticNet":               ElasticNet,
+    "SGDClassifier":            SGDClassifier,
+    "SGDRegressor":             SGDRegressor,
+    # ── Tree ──────────────────────────────────────────────────────────────────
+    "DecisionTreeClassifier":   DecisionTreeClassifier,
+    "DecisionTreeRegressor":    DecisionTreeRegressor,
+    # ── Ensemble ──────────────────────────────────────────────────────────────
+    "RandomForestClassifier":   RandomForestClassifier,
+    "RandomForestRegressor":    RandomForestRegressor,
+    "ExtraTreesClassifier":     ExtraTreesClassifier,
+    "ExtraTreesRegressor":      ExtraTreesRegressor,
     "GradientBoostingClassifier": GradientBoostingClassifier,
-    "GradientBoostingRegressor": GradientBoostingRegressor,
-    "SVC": SVC,
-    "SVR": SVR,
+    "GradientBoostingRegressor":  GradientBoostingRegressor,
+    "AdaBoostClassifier":       AdaBoostClassifier,
+    "AdaBoostRegressor":        AdaBoostRegressor,
+    # ── SVM ───────────────────────────────────────────────────────────────────
+    "SVC":                      SVC,
+    "SVR":                      SVR,
+    # ── Neighbors ─────────────────────────────────────────────────────────────
+    "KNeighborsClassifier":     KNeighborsClassifier,
+    "KNeighborsRegressor":      KNeighborsRegressor,
+    # ── Probabilistic ─────────────────────────────────────────────────────────
+    "GaussianNB":               GaussianNB,
+    "LinearDiscriminantAnalysis": LinearDiscriminantAnalysis,
 }
 
 
@@ -31,7 +66,7 @@ MODEL_REGISTRY: dict = {
 class MLPipelineResult:
     model: object
     y_val_pred: np.ndarray
-    train_curve: list[float]   # single value — no epochs in ML
+    train_curve: list[float]
     val_curve: list[float]
     runtime: float
 
@@ -42,8 +77,6 @@ def run_ml_pipeline(config: ExperimentConfig, data_split: DataSplit) -> MLPipeli
     if cls is None:
         raise ValueError(f"Unknown model '{config.model_name}'. Available: {list(MODEL_REGISTRY)}")
 
-    # Filter hyperparameters to only those accepted by the model
-    import inspect
     valid_params = inspect.signature(cls.__init__).parameters
     hp = {k: v for k, v in config.hyperparameters.items() if k in valid_params}
 
@@ -55,7 +88,6 @@ def run_ml_pipeline(config: ExperimentConfig, data_split: DataSplit) -> MLPipeli
 
     y_val_pred = model.predict(data_split.X_val)
 
-    # ML has no epoch loop — represent as single-step curves using loss proxy
     try:
         from sklearn.metrics import log_loss
         train_loss = round(float(log_loss(data_split.y_train, model.predict_proba(data_split.X_train))), 6)
