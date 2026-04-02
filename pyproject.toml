@@ -19,7 +19,8 @@ dependencies = [
   "pydantic>=2.6.0",
   "typer>=0.9.0",
   "rich>=13.7.0",
-  "matplotlib>=3.8.0"
+  "matplotlib>=3.8.0",
+  "pytest>=9.0.2",
 ]
 
 [project.scripts]
@@ -32,3 +33,11 @@ build-backend = "setuptools.backends.legacy:build"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["stratml*"]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]
