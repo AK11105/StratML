@@ -63,7 +63,16 @@ def score(state: StateObject, estimates: list[UncertaintyEstimate]) -> dict[str,
     else:
         table = _FITTING_PRIORITY["default"]
 
-    return {
+    scores = {
         e.action_type: round(table.get(e.action_type, 0.5) + e.predicted_gain * 0.3, 4)
         for e in estimates
     }
+
+    # Plateau override: boost switch_model when stuck
+    if sig.plateau_detected != "none" and "switch_model" in scores:
+        boost = 0.3 if sig.plateau_detected == "strong" else 0.15
+        scores["switch_model"] = round(scores["switch_model"] + boost, 4)
+        if "modify_regularization" in scores:
+            scores["modify_regularization"] = round(scores["modify_regularization"] - 0.2, 4)
+
+    return scores

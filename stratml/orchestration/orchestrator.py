@@ -8,7 +8,8 @@ Budget enforcement lives here.
 from __future__ import annotations
 
 import time
-from typing import Callable
+from pathlib import Path
+from typing import Callable, Optional
 
 from stratml.execution.data.loader import load_dataframe
 from stratml.execution.data.validator import build_dataset
@@ -48,17 +49,23 @@ class ExecutionOrchestrator:
         send_result: SendResultFn,
         split_config: SplitConfig | None = None,
         time_budget: float | None = None,
+        run_id: str = "run",
+        log: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.send_profile = send_profile
         self.send_result  = send_result
         self.split_config = split_config or SplitConfig(method="stratified")
         self.time_budget  = time_budget
+        self.run_id       = run_id
+        self.log          = log or (lambda msg: None)
 
     def run(self, dataset_path: str, target_column: str) -> None:
         # ── Phase 1+2: Ingest and profile ────────────────────────────────────
+        self.log("  Loading dataset...")
         df, name = load_dataframe(dataset_path)
         dataset  = build_dataset(df, name, target_column)
         profile  = build_profile(dataset)
+        self.log(f"  Profiled: {profile.rows} rows x {profile.columns} cols | {profile.problem_type}")
 
         # ── Phase 3: Split once, reuse across all iterations ─────────────────
         split_cfg = SplitConfig(
@@ -70,15 +77,24 @@ class ExecutionOrchestrator:
             random_seed=self.split_config.random_seed,
         )
         base_split = split_dataset(dataset, split_cfg, profile.problem_type)
+        self.log(f"  Split: train={len(base_split.X_train)} | val={len(base_split.X_val)} | test={len(base_split.X_test)}")
 
         # ── Send DataProfile to Team B, receive first ActionDecision ─────────
+        self.log("  Sending profile to Decision Engine...")
         action: ActionDecision = self.send_profile(profile)
+        self.log(f"  Decision [iter 0]: action={action.action_type} | params={action.parameters} | trigger={action.reason.trigger}")
 
-        iteration    = 0
+        iteration     = 0
         total_runtime = 0.0
+        current_model = action.parameters.get("model_name", "LogisticRegression")
 
         while action.action_type != "terminate":
             iteration += 1
+            self.log(f"\n  --- Iteration {iteration} ---")
+            if "model_name" not in action.parameters:
+                action.parameters["model_name"] = current_model
+            current_model = action.parameters.get("model_name", current_model)
+            self.log(f"  Training : {current_model} ({action.action_type}) ...")
 
             # ── Phase 4: Translate ActionDecision → ExperimentConfig ─────────
             config = build_experiment_config(action)
@@ -98,6 +114,7 @@ class ExecutionOrchestrator:
                 pipeline_result = run_dl_pipeline(config, clean_split)
             run_time = round(time.perf_counter() - t_start, 4)
             total_runtime += run_time
+            self.log(f"  Trained in {run_time:.2f}s")
 
             # ── Phase 6: Metrics ──────────────────────────────────────────────
             metrics = compute_metrics(
@@ -119,6 +136,7 @@ class ExecutionOrchestrator:
                 metrics=metrics,
                 config=config,
                 tensorboard_log_dir=tb_dir,
+                artifacts_root=Path("outputs") / self.run_id / "artifacts",
             )
 
             # ── Phase 8: Assemble ExperimentResult ───────────────────────────
@@ -140,4 +158,8 @@ class ExecutionOrchestrator:
                 break
 
             # ── Send result to Team B, receive next ActionDecision ────────────
+            primary = metrics.accuracy if metrics.accuracy is not None else (metrics.r2 or 0.0)
+            self.log(f"  Result   : primary={primary:.4f} | runtime={run_time:.2f}s")
+            self.log("  Evaluating signals & deciding next action...")
             action = self.send_result(result)
+            self.log(f"  Decision : {action.action_type} | trigger={action.reason.trigger} | confidence={action.confidence:.2f} | next={action.parameters}")

@@ -13,3 +13,5 @@ wheels/
 *.csv
 
 kiro.txt
+
+.env

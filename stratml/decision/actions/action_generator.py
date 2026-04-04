@@ -17,14 +17,25 @@ from stratml.core.schemas import CandidateAction, StateObject
 # Models available when no constraints are set
 _DEFAULT_MODELS = [
     "LogisticRegression",
-    "RandomForest",
-    "GradientBoosting",
+    "RandomForestClassifier",
+    "GradientBoostingClassifier",
+    "ExtraTreesClassifier",
     "SVC",
-    "XGBoost",
-    "MLP",
+    "KNeighborsClassifier",
+    "GaussianNB",
+    "DecisionTreeClassifier",
 ]
 
-_BOOTSTRAP_MODELS = ["LogisticRegression", "RandomForest"]
+_BOOTSTRAP_MODELS = [
+    "LogisticRegression",
+    "RandomForestClassifier",
+    "GradientBoostingClassifier",
+    "ExtraTreesClassifier",
+    "KNeighborsClassifier",
+    "GaussianNB",
+    "SVC",
+    "DecisionTreeClassifier",
+]
 
 
 def generate(state: StateObject) -> list[CandidateAction]:
@@ -78,16 +89,28 @@ def _rule_candidates(state: StateObject) -> list[CandidateAction]:
             parameters={"scale": 1.5},
         ))
 
-    # Overfitting → regularize or reduce capacity
+    # Overfitting → regularize first; escalate to switch_model when plateau hits
     if sig.overfitting != "none":
-        candidates.append(CandidateAction(
-            action_type="modify_regularization",
-            parameters={"direction": "increase"},
-        ))
-        candidates.append(CandidateAction(
-            action_type="decrease_model_capacity",
-            parameters={"scale": 0.75},
-        ))
+        # If plateau is strong, switch model takes priority over regularization
+        if sig.plateau_detected == "strong" and untried:
+            candidates.append(CandidateAction(
+                action_type="switch_model",
+                parameters={"model_name": untried[0]},
+            ))
+        else:
+            candidates.append(CandidateAction(
+                action_type="modify_regularization",
+                parameters={"direction": "increase"},
+            ))
+            candidates.append(CandidateAction(
+                action_type="decrease_model_capacity",
+                parameters={"scale": 0.75},
+            ))
+            if state.trajectory.steps_since_improvement >= 2 and untried:
+                candidates.append(CandidateAction(
+                    action_type="switch_model",
+                    parameters={"model_name": untried[0]},
+                ))
 
     # Stagnating / plateau → switch model
     if sig.stagnating != "none" or sig.plateau_detected != "none":

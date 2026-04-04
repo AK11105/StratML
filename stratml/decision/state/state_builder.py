@@ -39,6 +39,7 @@ from stratml.decision.state.signals import compute_signals
 def build_state_from_profile(
     profile: DataProfile,
     *,
+    run_id: str = "run",
     primary_metric: str = "accuracy",
     optimization_goal: str = "maximize",
     allowed_models: Optional[list[str]] = None,
@@ -57,7 +58,7 @@ def build_state_from_profile(
 
     return StateObject(
         meta=StateMeta(
-            experiment_id="bootstrap",
+            experiment_id=run_id,
             iteration=0,
             timestamp=datetime.now(timezone.utc).isoformat(),
         ),

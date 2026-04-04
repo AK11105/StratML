@@ -1,9 +1,9 @@
 mode: beginner
 dataset:
-  path: "./data/iris.csv"
-  target_column: species
+  path: "./data/digits_noisy.csv"
+  target_column: target
 execution:
-  max_iterations: 5
+  max_iterations: 8
   timeout_per_run: 300
   random_seed: 42
 split:
