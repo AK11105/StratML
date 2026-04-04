@@ -57,17 +57,17 @@ def _infer_trigger(state: StateObject) -> str:
     sig = state.signals
     if state.meta.iteration == 0:
         return "bootstrap"
-    if sig.converged and sig.well_fitted:
+    if sig.converged != "none" and sig.well_fitted != "none":
         return "convergence"
-    if sig.underfitting:
+    if sig.underfitting != "none":
         return "underfitting"
-    if sig.overfitting:
+    if sig.overfitting != "none":
         return "overfitting"
-    if sig.stagnating or sig.plateau_detected:
+    if sig.stagnating != "none" or sig.plateau_detected != "none":
         return "stagnation"
-    if sig.diverging:
+    if sig.diverging != "none":
         return "divergence"
-    if sig.diminishing_returns:
+    if sig.diminishing_returns != "none":
         return "diminishing_returns"
     return "exploration"
 
@@ -80,9 +80,9 @@ def _build_evidence(state: StateObject) -> dict:
         "best_score": t.best_score,
         "slope": t.slope,
         "steps_since_improvement": t.steps_since_improvement,
-        "underfitting": sig.underfitting,
-        "overfitting": sig.overfitting,
-        "converged": sig.converged,
-        "stagnating": sig.stagnating,
+        "underfitting": sig.underfitting != "none",
+        "overfitting": sig.overfitting != "none",
+        "converged": sig.converged != "none",
+        "stagnating": sig.stagnating != "none",
         "remaining_budget": state.resources.remaining_budget,
     }

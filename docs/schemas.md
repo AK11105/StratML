@@ -344,29 +344,41 @@ StateObject = {
 
     # =========================
     # SIGNALS (DERIVED)
+    # Each signal: str ("none" | "weak" | "strong") + float confidence [0.0, 1.0]
     # =========================
     "signals": {
 
         # fitting
-        "underfitting": bool,
-        "overfitting": bool,
-        "well_fitted": bool,
+        "underfitting": str,                  # "none" | "weak" | "strong"
+        "underfitting_confidence": float,
+        "overfitting": str,
+        "overfitting_confidence": float,
+        "well_fitted": str,
+        "well_fitted_confidence": float,
 
         # convergence
-        "converged": bool,
-        "stagnating": bool,
-        "diverging": bool,
+        "converged": str,
+        "converged_confidence": float,
+        "stagnating": str,
+        "stagnating_confidence": float,
+        "diverging": str,
+        "diverging_confidence": float,
 
         # stability
-        "unstable_training": bool,
-        "high_variance": bool,
+        "unstable_training": str,
+        "unstable_training_confidence": float,
+        "high_variance": str,
+        "high_variance_confidence": float,
 
         # efficiency
-        "too_slow": bool,
+        "too_slow": str,
+        "too_slow_confidence": float,
 
         # optimization
-        "plateau_detected": bool,
-        "diminishing_returns": bool
+        "plateau_detected": str,
+        "plateau_detected_confidence": float,
+        "diminishing_returns": str,
+        "diminishing_returns_confidence": float
     },
 
     # =========================

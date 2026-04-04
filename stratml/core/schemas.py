@@ -241,23 +241,37 @@ class StateSearch(BaseModel):
     repeated_configs: int
 
 
+SignalStrength = str  # "none" | "weak" | "strong"
+
+
 class StateSignals(BaseModel):
     # fitting
-    underfitting: bool = False
-    overfitting: bool = False
-    well_fitted: bool = False
+    underfitting: SignalStrength = "none"
+    underfitting_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    overfitting: SignalStrength = "none"
+    overfitting_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    well_fitted: SignalStrength = "none"
+    well_fitted_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     # convergence
-    converged: bool = False
-    stagnating: bool = False
-    diverging: bool = False
+    converged: SignalStrength = "none"
+    converged_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    stagnating: SignalStrength = "none"
+    stagnating_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    diverging: SignalStrength = "none"
+    diverging_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     # stability
-    unstable_training: bool = False
-    high_variance: bool = False
+    unstable_training: SignalStrength = "none"
+    unstable_training_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    high_variance: SignalStrength = "none"
+    high_variance_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     # efficiency
-    too_slow: bool = False
+    too_slow: SignalStrength = "none"
+    too_slow_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     # optimization
-    plateau_detected: bool = False
-    diminishing_returns: bool = False
+    plateau_detected: SignalStrength = "none"
+    plateau_detected_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    diminishing_returns: SignalStrength = "none"
+    diminishing_returns_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class StateUncertainty(BaseModel):

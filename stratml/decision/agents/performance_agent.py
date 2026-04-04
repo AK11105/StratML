@@ -54,11 +54,11 @@ def score(state: StateObject, estimates: list[UncertaintyEstimate]) -> dict[str,
     """Return performance_score per action_type."""
     sig = state.signals
 
-    if sig.underfitting:
+    if sig.underfitting != "none":
         table = _FITTING_PRIORITY["underfitting"]
-    elif sig.overfitting:
+    elif sig.overfitting != "none":
         table = _FITTING_PRIORITY["overfitting"]
-    elif sig.well_fitted:
+    elif sig.well_fitted != "none":
         table = _FITTING_PRIORITY["well_fitted"]
     else:
         table = _FITTING_PRIORITY["default"]

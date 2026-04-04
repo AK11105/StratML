@@ -62,12 +62,12 @@ def _rule_candidates(state: StateObject) -> list[CandidateAction]:
         return [CandidateAction(action_type="terminate", parameters={})]
 
     # Converged and well-fitted → terminate
-    if sig.converged and sig.well_fitted:
+    if sig.converged != "none" and sig.well_fitted != "none":
         candidates.append(CandidateAction(action_type="terminate", parameters={}))
         return candidates
 
     # Underfitting → try a more powerful model or increase capacity
-    if sig.underfitting:
+    if sig.underfitting != "none":
         if untried:
             candidates.append(CandidateAction(
                 action_type="switch_model",
@@ -79,7 +79,7 @@ def _rule_candidates(state: StateObject) -> list[CandidateAction]:
         ))
 
     # Overfitting → regularize or reduce capacity
-    if sig.overfitting:
+    if sig.overfitting != "none":
         candidates.append(CandidateAction(
             action_type="modify_regularization",
             parameters={"direction": "increase"},
@@ -90,7 +90,7 @@ def _rule_candidates(state: StateObject) -> list[CandidateAction]:
         ))
 
     # Stagnating / plateau → switch model
-    if sig.stagnating or sig.plateau_detected:
+    if sig.stagnating != "none" or sig.plateau_detected != "none":
         if untried:
             candidates.append(CandidateAction(
                 action_type="switch_model",
@@ -98,14 +98,14 @@ def _rule_candidates(state: StateObject) -> list[CandidateAction]:
             ))
 
     # Diverging → change optimizer / reduce lr
-    if sig.diverging:
+    if sig.diverging != "none":
         candidates.append(CandidateAction(
             action_type="change_optimizer",
             parameters={"learning_rate_scale": 0.1},
         ))
 
     # Diminishing returns → try next untried model or terminate
-    if sig.diminishing_returns:
+    if sig.diminishing_returns != "none":
         if untried:
             candidates.append(CandidateAction(
                 action_type="switch_model",
