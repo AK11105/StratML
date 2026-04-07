@@ -1,9 +1,9 @@
 mode: beginner
 dataset:
-  path: "./data/digits_noisy.csv"
+  path: data/digits_noisy.csv
   target_column: target
 execution:
-  max_iterations: 8
+  max_iterations: 5
   timeout_per_run: 300
   random_seed: 42
 split:
