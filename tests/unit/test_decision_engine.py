@@ -110,21 +110,21 @@ class TestActionGenerator:
 
     def test_underfitting_suggests_switch_or_increase(self):
         from stratml.decision.actions.action_generator import generate
-        state = _make_state(underfitting=True, well_fitted=False)
+        state = _make_state(underfitting="strong", well_fitted="none")
         candidates = generate(state)
         types = {c.action_type for c in candidates}
         assert types & {"switch_model", "increase_model_capacity"}
 
     def test_overfitting_suggests_regularize_or_decrease(self):
         from stratml.decision.actions.action_generator import generate
-        state = _make_state(overfitting=True, well_fitted=False)
+        state = _make_state(overfitting="strong", well_fitted="none")
         candidates = generate(state)
         types = {c.action_type for c in candidates}
         assert types & {"modify_regularization", "decrease_model_capacity"}
 
     def test_converged_well_fitted_returns_terminate(self):
         from stratml.decision.actions.action_generator import generate
-        state = _make_state(converged=True, well_fitted=True)
+        state = _make_state(converged="strong", well_fitted="strong")
         candidates = generate(state)
         assert candidates[0].action_type == "terminate"
         assert len(candidates) == 1
@@ -137,7 +137,7 @@ class TestActionGenerator:
 
     def test_no_duplicate_candidates(self):
         from stratml.decision.actions.action_generator import generate
-        state = _make_state(stagnating=True, underfitting=True, well_fitted=False)
+        state = _make_state(stagnating="strong", underfitting="strong", well_fitted="none")
         candidates = generate(state)
         keys = [(c.action_type, str(sorted(c.parameters.items()))) for c in candidates]
         assert len(keys) == len(set(keys))
@@ -298,7 +298,7 @@ class TestPerformanceAgent:
         from stratml.decision.agents.performance_agent import score
         from stratml.decision.learning.value_model import predict
         from stratml.decision.learning.uncertainty import estimate
-        state = _make_state(underfitting=True, well_fitted=False)
+        state = _make_state(underfitting="strong", well_fitted="none")
         candidates = [
             CandidateAction(action_type="switch_model", parameters={}),
             CandidateAction(action_type="terminate", parameters={}),
@@ -351,8 +351,8 @@ class TestStabilityAgent:
         from stratml.decision.agents.stability_agent import score
         from stratml.decision.learning.value_model import predict
         from stratml.decision.learning.uncertainty import estimate
-        stable_state = _make_state(diverging=False)
-        unstable_state = _make_state(diverging=True)
+        stable_state = _make_state(diverging="none")
+        unstable_state = _make_state(diverging="strong")
         candidates = [CandidateAction(action_type="increase_model_capacity", parameters={})]
         s_stable = score(stable_state, estimate(predict(stable_state, candidates)))
         s_unstable = score(unstable_state, estimate(predict(unstable_state, candidates)))

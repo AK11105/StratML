@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Optional
 import pandas as pd
 from pydantic import BaseModel, Field
+from stratml.core.schemas import PreprocessingConfig  # noqa: F401
 
 
 class Dataset(BaseModel):
@@ -48,12 +49,7 @@ class DataProfile(BaseModel):
     recommended_metrics: list[str]
 
 
-class PreprocessingConfig(BaseModel):
-    missing_value_strategy: str = Field(..., pattern="^(mean|median|mode|drop)$")
-    scaling: str = Field(..., pattern="^(standard|minmax|none)$")
-    encoding: str = Field(..., pattern="^(onehot|label|none)$")
-    imbalance_strategy: str = Field(..., pattern="^(oversample|undersample|none)$")
-    feature_selection: str = Field(..., pattern="^(variance_threshold|none)$")
+# PreprocessingConfig imported from stratml.core.schemas
 
 
 class ExperimentMetrics(BaseModel):

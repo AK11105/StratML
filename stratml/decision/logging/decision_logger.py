@@ -43,7 +43,7 @@ def log(
     filename = f"{state.meta.experiment_id}_{state.meta.iteration:04d}.json"
     path = _LOG_DIR / filename
 
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(record.model_dump_json(indent=2))
 
     return path

@@ -28,11 +28,11 @@ def score(state: StateObject, estimates: list[UncertaintyEstimate]) -> dict[str,
     sig = state.signals
 
     instability_penalty = 0.0
-    if sig.diverging:
+    if sig.diverging != "none":
         instability_penalty += 0.3
-    if sig.unstable_training:
+    if sig.unstable_training != "none":
         instability_penalty += 0.2
-    if sig.high_variance:
+    if sig.high_variance != "none":
         instability_penalty += 0.1
 
     scores: dict[str, float] = {}

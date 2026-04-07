@@ -31,7 +31,6 @@ from stratml.execution.schemas import ExperimentConfig, DataSplit
 
 MODEL_REGISTRY: dict = {
     # ── Linear ────────────────────────────────────────────────────────────────
-    "LogisticRegression":       LogisticRegression,
     "LinearRegression":         LinearRegression,
     "Ridge":                    Ridge,
     "Lasso":                    Lasso,
@@ -42,6 +41,7 @@ MODEL_REGISTRY: dict = {
     "DecisionTreeClassifier":   DecisionTreeClassifier,
     "DecisionTreeRegressor":    DecisionTreeRegressor,
     # ── Ensemble ──────────────────────────────────────────────────────────────
+    "LogisticRegression":       LogisticRegression,
     "RandomForestClassifier":   RandomForestClassifier,
     "RandomForestRegressor":    RandomForestRegressor,
     "ExtraTreesClassifier":     ExtraTreesClassifier,

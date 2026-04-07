@@ -23,9 +23,11 @@ def save_artifacts(
     metrics: ExperimentMetrics,
     config: ExperimentConfig,
     tensorboard_log_dir: str | None = None,
+    artifacts_root: Path | None = None,
 ) -> ArtifactRefs:
     """Save model + metrics + config to disk. Return ArtifactRefs."""
-    out_dir = _ARTIFACTS_ROOT / experiment_id
+    root    = artifacts_root or _ARTIFACTS_ROOT
+    out_dir = root / experiment_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
     model_path = str(out_dir / "model.pkl")
