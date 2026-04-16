@@ -44,6 +44,8 @@ class ValuePrediction:
 
 def _load_training_data(csv_path: Path):
     """Return (X, y) arrays from the CSV, or (None, None) if insufficient data."""
+    if not csv_path.exists():
+        return None, None
     try:
         import pandas as pd
         import numpy as np

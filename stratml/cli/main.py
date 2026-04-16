@@ -217,8 +217,8 @@ def run_pipeline(args):
         print(f"  [Warning] Report/model generation failed: {ex}\n")
 
     # Model download prompt (.pkl + model.py)
-    model_pkl    = out_dir / "artifacts" / run_id / "model.pkl"
-    model_script = out_dir / "model.py"
+    model_pkl    = out_dir / "artifacts" / "model.pkl"
+    model_script = out_dir / "artifacts" / "model.py"
     if model_pkl.exists():
         answer = input("  Download best model files (model.pkl + model.py)? [y/N]: ").strip().lower()
         if answer == "y":

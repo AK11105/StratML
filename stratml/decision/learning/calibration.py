@@ -13,13 +13,16 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from stratml.decision.learning.value_model import ValuePrediction, _DATASET_PATH, _MIN_ROWS
+import stratml.decision.learning.value_model as value_model
+from stratml.decision.learning.value_model import ValuePrediction, _MIN_ROWS
 
 log = logging.getLogger(__name__)
 
 
 def _load_calibration_pairs(csv_path: Path):
     """Return (predicted, actual) arrays, or (None, None) if insufficient data."""
+    if not csv_path.exists():
+        return None, None
     try:
         import pandas as pd
 
@@ -42,7 +45,7 @@ def _load_calibration_pairs(csv_path: Path):
 
 def calibrate(predictions: list[ValuePrediction]) -> list[ValuePrediction]:
     """Correct predicted gains using fitted IsotonicRegression when data is available."""
-    y_pred_train, y_true_train = _load_calibration_pairs(_DATASET_PATH)
+    y_pred_train, y_true_train = _load_calibration_pairs(value_model._DATASET_PATH)
 
     if y_pred_train is not None:
         try:

@@ -27,6 +27,7 @@ from stratml.decision.policy.action_selector import select
 from stratml.decision.logging import decision_logger
 from stratml.decision.validation import counterfactual
 from stratml.decision.learning import dataset_builder
+from stratml.decision.learning import value_model as _value_model
 from stratml.decision.validation.counterfactual import record as record_cf
 
 
@@ -63,6 +64,7 @@ class DecisionEngine:
         decision_logger._LOG_DIR      = self._out_dir / "decision_logs"
         counterfactual._CF_LOG        = self._out_dir / "decision_logs" / "counterfactual_log.jsonl"
         dataset_builder._DATASET_PATH = self._out_dir / "decision_logs" / "decision_dataset.csv"
+        _value_model._DATASET_PATH    = self._out_dir / "decision_logs" / "decision_dataset.csv"
 
     def receive_profile(self, profile: DataProfile) -> ActionDecision:
         self._profile = profile

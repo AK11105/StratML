@@ -26,8 +26,8 @@ def save_artifacts(
     artifacts_root: Path | None = None,
 ) -> ArtifactRefs:
     """Save model + metrics + config to disk. Return ArtifactRefs."""
-    root    = artifacts_root or _ARTIFACTS_ROOT
-    out_dir = root / experiment_id
+    root    = artifacts_root or (_ARTIFACTS_ROOT / experiment_id)
+    out_dir = root
     out_dir.mkdir(parents=True, exist_ok=True)
 
     model_path = str(out_dir / "model.pkl")

@@ -23,8 +23,8 @@ from stratml.core.schemas import CandidateAction, StateObject
 log = logging.getLogger(__name__)
 
 _DEFAULT_MODELS = [
-    "LogisticRegression",
     "RandomForestClassifier",
+    "LogisticRegression",
     "GradientBoostingClassifier",
     "ExtraTreesClassifier",
     "SVC",
@@ -34,8 +34,8 @@ _DEFAULT_MODELS = [
 ]
 
 _BOOTSTRAP_MODELS = [
-    "LogisticRegression",
     "RandomForestClassifier",
+    "LogisticRegression",
     "GradientBoostingClassifier",
     "ExtraTreesClassifier",
     "KNeighborsClassifier",
