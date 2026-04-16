@@ -105,7 +105,7 @@ def _llm_rank(
     stab_scores: dict[str, float],
 ) -> Optional[list[RankedAction]]:
     try:
-        from langchain_openai import ChatOpenAI
+        from langchain_groq import ChatGroq
         from langchain_core.messages import HumanMessage, SystemMessage
 
         sig = state.signals
@@ -132,7 +132,7 @@ def _llm_rank(
             "one-sentence rationale for each. Include every action_type listed above."
         )
 
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0).with_structured_output(_CoordinatorOutput)
+        llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0).with_structured_output(_CoordinatorOutput)
         output: _CoordinatorOutput = llm.invoke([SystemMessage(_SYSTEM_PROMPT), HumanMessage(human)])
 
         # Build a lookup from LLM output
@@ -176,7 +176,7 @@ def rank(
     stab_scores: dict[str, float],
 ) -> list[RankedAction]:
     """Return candidates sorted by final_score descending."""
-    if os.getenv("OPENAI_API_KEY"):
+    if os.getenv("GROQ_API_KEY"):
         result = _llm_rank(state, estimates, perf_scores, eff_scores, stab_scores)
         if result is not None:
             return result
