@@ -3,17 +3,27 @@ performance_agent.py
 --------------------
 Decision Council — Performance Agent.
 
-Scores each candidate action on how well it is expected to improve
-model accuracy, given the current fitting/trajectory signals.
+LLM path: LangChain chain with structured output (gpt-4o-mini).
+Fallback: rule-based lookup table when LLM call fails or OPENAI_API_KEY is absent.
 """
 
 from __future__ import annotations
 
+import logging
+import os
+from typing import Optional
+
+from pydantic import BaseModel
+
 from stratml.core.schemas import StateObject
 from stratml.decision.learning.uncertainty import UncertaintyEstimate
 
+log = logging.getLogger(__name__)
 
-# Score boost/penalty per action type based on fitting state
+# ---------------------------------------------------------------------------
+# Rule-based fallback
+# ---------------------------------------------------------------------------
+
 _FITTING_PRIORITY: dict[str, dict[str, float]] = {
     "underfitting": {
         "switch_model": 0.85,
@@ -50,10 +60,8 @@ _FITTING_PRIORITY: dict[str, dict[str, float]] = {
 }
 
 
-def score(state: StateObject, estimates: list[UncertaintyEstimate]) -> dict[str, float]:
-    """Return performance_score per action_type."""
+def _rule_score(state: StateObject, estimates: list[UncertaintyEstimate]) -> dict[str, float]:
     sig = state.signals
-
     if sig.underfitting != "none":
         table = _FITTING_PRIORITY["underfitting"]
     elif sig.overfitting != "none":
@@ -68,7 +76,6 @@ def score(state: StateObject, estimates: list[UncertaintyEstimate]) -> dict[str,
         for e in estimates
     }
 
-    # Plateau override: boost switch_model when stuck
     if sig.plateau_detected != "none" and "switch_model" in scores:
         boost = 0.3 if sig.plateau_detected == "strong" else 0.15
         scores["switch_model"] = round(scores["switch_model"] + boost, 4)
@@ -76,3 +83,59 @@ def score(state: StateObject, estimates: list[UncertaintyEstimate]) -> dict[str,
             scores["modify_regularization"] = round(scores["modify_regularization"] - 0.2, 4)
 
     return scores
+
+
+# ---------------------------------------------------------------------------
+# LLM path
+# ---------------------------------------------------------------------------
+
+_SYSTEM_PROMPT = (
+    "You are a performance analyst. Your only concern is whether a candidate action "
+    "will improve the model's predictive accuracy given the current fitting state and "
+    "trajectory. Score each action 0.0-1.0 on expected performance gain."
+)
+
+
+class _Scores(BaseModel):
+    scores: dict[str, float]
+
+
+def _llm_score(state: StateObject, estimates: list[UncertaintyEstimate]) -> Optional[dict[str, float]]:
+    try:
+        from langchain_openai import ChatOpenAI
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        sig = state.signals
+        traj = state.trajectory
+        candidates = [
+            {"action_type": e.action_type, "parameters": e.parameters, "predicted_gain": e.predicted_gain}
+            for e in estimates
+        ]
+        human = (
+            f"Fitting: underfitting={sig.underfitting}, overfitting={sig.overfitting}, "
+            f"well_fitted={sig.well_fitted}, plateau={sig.plateau_detected}\n"
+            f"Trajectory: slope={traj.slope:.4f}, steps_since_improvement={traj.steps_since_improvement}, "
+            f"trend={traj.trend}, best_score={traj.best_score:.4f}\n"
+            f"Model: {state.model.model_name}\n"
+            f"Candidates: {candidates}\n\n"
+            "Return JSON with key 'scores' mapping each action_type to a float 0.0-1.0."
+        )
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0).with_structured_output(_Scores)
+        result: _Scores = llm.invoke([SystemMessage(_SYSTEM_PROMPT), HumanMessage(human)])
+        return {k: round(max(0.0, min(v, 1.0)), 4) for k, v in result.scores.items()}
+    except Exception as exc:
+        log.warning("performance_agent LLM failed (%s), using rule fallback", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Public interface
+# ---------------------------------------------------------------------------
+
+def score(state: StateObject, estimates: list[UncertaintyEstimate]) -> dict[str, float]:
+    """Return performance_score per action_type."""
+    if os.getenv("OPENAI_API_KEY"):
+        result = _llm_score(state, estimates)
+        if result is not None:
+            return result
+    return _rule_score(state, estimates)
