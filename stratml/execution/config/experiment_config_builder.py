@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from stratml.execution.schemas import ActionDecision, ExperimentConfig
 
-_DL_MODELS = {"MLP", "PyTorchMLP"}
+_DL_MODELS = {"MLP", "CNN1D", "RNN", "PyTorchMLP"}
 
 # Regularization param per model family
 _REG_PARAM: dict[str, tuple[str, float, float]] = {

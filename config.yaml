@@ -16,3 +16,9 @@ logging:
 constraints:
   max_memory: null
   max_cpu: null
+deep_learning:
+  enabled: false
+  architecture: MLP
+  epochs: 20
+  learning_rate: 0.001
+  batch_size: 32

@@ -53,7 +53,36 @@ Saves JSON to `outputs/iris/data_profile.json`.
 stratml run config.yaml --path data/iris.csv --dry-run
 ```
 
-Resolves and prints the full config. Orchestrator not yet connected — `run` without `--dry-run` prints a placeholder.
+Resolves and prints the full config without executing.
+
+---
+
+## Step 6 — Run the full pipeline (ML)
+
+```bash
+stratml run config.yaml
+```
+
+Runs the full AutoML loop: profile → decision engine → ML pipeline → report.
+
+---
+
+## Step 7 — Run with deep learning
+
+Pass `--dl` to switch the execution engine to PyTorch:
+
+```bash
+# Default MLP
+stratml run config.yaml --dl
+
+# 1-D CNN
+stratml run config.yaml --dl --architecture CNN1D --epochs 50 --lr 0.0005
+
+# LSTM/RNN
+stratml run config.yaml --dl --architecture RNN --epochs 30 --batch-size 64
+```
+
+Or set `deep_learning.enabled: true` in `config.yaml` to make DL the default for a project.
 
 ---
 
@@ -66,7 +95,9 @@ Resolves and prints the full config. Orchestrator not yet connected — `run` wi
 | `stratml validate-config` | ✅ |
 | `stratml profile-data` | ✅ |
 | `stratml run --dry-run` | ✅ |
-| `stratml run` (full pipeline) | 🔲 orchestrator not connected |
-| ML/DL pipelines | 🔲 |
-| Decision agent / rule engine | 🔲 |
+| `stratml run` (full ML pipeline) | ✅ |
+| `stratml run --dl` (DL pipeline) | ✅ |
+| ML pipelines (scikit-learn) | ✅ |
+| DL pipelines (PyTorch MLP/CNN1D/RNN) | ✅ |
+| Decision agent / rule engine | ✅ |
 | MLflow / TensorBoard / LangSmith | 🔲 |

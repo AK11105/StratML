@@ -68,12 +68,41 @@ Optional flags:
 --mode <beginner|intermediate|expert>
 --max-iter <n>                 override max iterations
 --dry-run                      print resolved config without running
+--dl                           enable deep learning mode (PyTorch)
+--architecture <MLP|CNN1D|RNN> DL architecture (default: MLP)
+--epochs <n>                   number of training epochs (default: 20)
+--lr <float>                   learning rate (default: 0.001)
+--batch-size <n>               batch size (default: 32)
 ```
 
 Dry run example:
 
 ```bash
 stratml run config.yaml --dry-run
+```
+
+Deep learning examples:
+
+```bash
+# Run with default MLP architecture
+stratml run config.yaml --dl
+
+# Run with CNN1D, custom epochs and learning rate
+stratml run config.yaml --dl --architecture CNN1D --epochs 50 --lr 0.0005
+
+# Run with RNN, dry-run to preview config
+stratml run config.yaml --dl --architecture RNN --epochs 30 --dry-run
+```
+
+DL mode can also be enabled via `config.yaml`:
+
+```yaml
+deep_learning:
+  enabled: true
+  architecture: MLP   # MLP | CNN1D | RNN
+  epochs: 20
+  learning_rate: 0.001
+  batch_size: 32
 ```
 
 ---

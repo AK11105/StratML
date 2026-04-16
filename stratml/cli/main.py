@@ -17,6 +17,13 @@ DEFAULT_CONFIG = {
     "split": {"method": "stratified", "test_size": 0.2},
     "logging": {"enable_mlflow": False, "enable_tensorboard": False, "log_level": "info"},
     "constraints": {"max_memory": None, "max_cpu": None},
+    "deep_learning": {
+        "enabled": False,
+        "architecture": "MLP",
+        "epochs": 20,
+        "learning_rate": 0.001,
+        "batch_size": 32,
+    },
 }
 
 
@@ -47,6 +54,17 @@ def apply_cli_overrides(config, args):
         config["execution"]["max_iterations"] = args.max_iter
     if getattr(args, "path", None) is not None:
         config["dataset"]["path"] = args.path
+    dl = config.setdefault("deep_learning", {})
+    if getattr(args, "dl", False):
+        dl["enabled"] = True
+    if getattr(args, "architecture", None) is not None:
+        dl["architecture"] = args.architecture
+    if getattr(args, "epochs", None) is not None:
+        dl["epochs"] = args.epochs
+    if getattr(args, "lr", None) is not None:
+        dl["learning_rate"] = args.lr
+    if getattr(args, "batch_size", None) is not None:
+        dl["batch_size"] = args.batch_size
     return config
 
 
@@ -96,6 +114,13 @@ def run_pipeline(args):
         print(f"  Random seed   : {e['random_seed']}")
         print(f"  MLflow        : {config['logging']['enable_mlflow']}")
         print(f"  TensorBoard   : {config['logging']['enable_tensorboard']}")
+        dl_cfg = config.get("deep_learning", {})
+        if dl_cfg.get("enabled", False):
+            print(f"  DL Mode       : enabled")
+            print(f"  Architecture  : {dl_cfg.get('architecture', 'MLP')}")
+            print(f"  Epochs        : {dl_cfg.get('epochs', 20)}")
+            print(f"  Learning rate : {dl_cfg.get('learning_rate', 0.001)}")
+            print(f"  Batch size    : {dl_cfg.get('batch_size', 32)}")
         print(f"  {sep}")
         print()
         return
@@ -121,21 +146,37 @@ def run_pipeline(args):
     import shutil as _shutil
     from datetime import datetime as _dt, timezone as _tz
 
-    allowed_models = (
-        config.get("intermediate", {}).get("allowed_models")
-        or config.get("expert", {}).get("allowed_models")
-        or None
-    )
+    dl_cfg = config.get("deep_learning", {})
+    dl_enabled = dl_cfg.get("enabled", False)
+    if dl_enabled:
+        arch = dl_cfg.get("architecture", "MLP").upper()
+        allowed_models = [arch if arch in ("MLP", "CNN1D", "RNN") else "MLP"]
+    else:
+        allowed_models = (
+            config.get("intermediate", {}).get("allowed_models")
+            or config.get("expert", {}).get("allowed_models")
+            or None
+        )
 
     dataset_name = _Path(d["path"]).stem
     run_id  = f"{dataset_name}_{_dt.now(_tz.utc).strftime('%Y%m%d_%H%M%S')}"
     out_dir = _Path("outputs") / run_id
+
+    dl_hyperparams = None
+    if dl_enabled:
+        dl_hyperparams = {
+            "architecture": dl_cfg.get("architecture", "MLP").upper(),
+            "epochs": dl_cfg.get("epochs", 20),
+            "learning_rate": dl_cfg.get("learning_rate", 0.001),
+            "batch_size": dl_cfg.get("batch_size", 32),
+        }
 
     engine = DecisionEngine(
         max_iterations=e["max_iterations"],
         time_budget=e.get("timeout_per_run"),
         allowed_models=allowed_models,
         run_id=run_id,
+        dl_hyperparams=dl_hyperparams,
     )
 
     def _log(msg): print(msg)
@@ -286,6 +327,11 @@ def main():
     run_parser.add_argument("--mode", choices=["beginner", "intermediate", "expert"])
     run_parser.add_argument("--max-iter", type=int)
     run_parser.add_argument("--dry-run", action="store_true")
+    run_parser.add_argument("--dl", action="store_true", help="Enable deep learning mode")
+    run_parser.add_argument("--architecture", choices=["MLP", "CNN1D", "RNN"], help="DL architecture (default: MLP)")
+    run_parser.add_argument("--epochs", type=int, help="Number of training epochs")
+    run_parser.add_argument("--lr", type=float, help="Learning rate")
+    run_parser.add_argument("--batch-size", type=int, help="Batch size")
 
     validate_parser = subparsers.add_parser("validate-config")
     validate_parser.add_argument("config", type=str)

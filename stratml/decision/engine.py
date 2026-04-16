@@ -39,12 +39,14 @@ class DecisionEngine:
         max_iterations: int = 20,
         time_budget: Optional[float] = None,
         run_id: Optional[str] = None,
+        dl_hyperparams: Optional[dict] = None,
     ) -> None:
         self.primary_metric    = primary_metric
         self.optimization_goal = optimization_goal
         self.allowed_models    = allowed_models
         self.max_iterations    = max_iterations
         self.time_budget       = time_budget
+        self.dl_hyperparams    = dl_hyperparams or {}
         self.run_id            = run_id or datetime.now(timezone.utc).strftime("run_%Y%m%d_%H%M%S")
 
         self._history          = ExperimentHistory()
@@ -112,6 +114,10 @@ class DecisionEngine:
 
         ranked   = rank(state, estimates, perf_scores, eff_scores, stab_scores)
         decision = select(state, ranked)
+
+        # Inject DL hyperparams when running in DL mode
+        if self.dl_hyperparams and decision.action_type != "terminate":
+            decision.parameters.update(self.dl_hyperparams)
 
         record_dataset(state, candidates[0])
         decision_logger.log(state, candidates, decision)
