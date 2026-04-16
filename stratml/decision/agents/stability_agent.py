@@ -3,8 +3,8 @@ stability_agent.py
 ------------------
 Decision Council — Stability Agent.
 
-LLM path: LangChain chain with structured output (gpt-4o-mini).
-Fallback: rule-based stability table when LLM call fails or OPENAI_API_KEY is absent.
+LLM path: LangChain chain with structured output (llama-3.3-70b-versatile).
+Fallback: rule-based stability table when LLM call fails or GROQ_API_KEY is absent.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ class _Scores(BaseModel):
 
 def _llm_score(state: StateObject, estimates: list[UncertaintyEstimate]) -> Optional[dict[str, float]]:
     try:
-        from langchain_openai import ChatOpenAI
+        from langchain_groq import ChatGroq
         from langchain_core.messages import HumanMessage, SystemMessage
 
         sig = state.signals
@@ -88,7 +88,7 @@ def _llm_score(state: StateObject, estimates: list[UncertaintyEstimate]) -> Opti
             f"Candidates: {candidates}\n\n"
             "Return JSON with key 'scores' mapping each action_type to a float 0.0-1.0."
         )
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0).with_structured_output(_Scores)
+        llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0).with_structured_output(_Scores)
         result: _Scores = llm.invoke([SystemMessage(_SYSTEM_PROMPT), HumanMessage(human)])
         return {k: round(max(0.0, min(v, 1.0)), 4) for k, v in result.scores.items()}
     except Exception as exc:
@@ -102,7 +102,7 @@ def _llm_score(state: StateObject, estimates: list[UncertaintyEstimate]) -> Opti
 
 def score(state: StateObject, estimates: list[UncertaintyEstimate]) -> dict[str, float]:
     """Return stability_score per action_type. Higher = more stable choice."""
-    if os.getenv("OPENAI_API_KEY"):
+    if os.getenv("GROQ_API_KEY"):
         result = _llm_score(state, estimates)
         if result is not None:
             return result

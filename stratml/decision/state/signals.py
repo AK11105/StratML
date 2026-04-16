@@ -22,7 +22,7 @@ load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI  # requires langchain-openai
+from langchain_groq import ChatGroq  # requires langchain-groq
 
 from stratml.core.schemas import StateObject, StateSignals
 
@@ -187,7 +187,7 @@ def assess_optimization(steps_since: int, improvement_rate: float) -> str:
 _TOOLS = [assess_fitting, assess_convergence, assess_stability, assess_efficiency, assess_optimization]
 
 def _build_agent() -> object:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
     return create_react_agent(llm, _TOOLS)
 
 
@@ -219,7 +219,7 @@ def compute_signals(state: StateObject) -> StateSignals:
     Use a ReAct agent to reason over state metrics and flag signals.
     Falls back to direct rule evaluation if the agent is unavailable.
     """
-    if not os.environ.get("OPENAI_API_KEY"):
+    if not os.environ.get("GROQ_API_KEY"):
         return _rule_based(state)
 
     g = state.generalization

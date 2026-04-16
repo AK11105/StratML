@@ -5,7 +5,7 @@ Decision/Actions — Candidate Action Generator.
 
 LLM path: LangChain chain reads full StateObject and proposes list[CandidateAction]
           via structured output. Can propose context-sensitive, composed actions.
-Fallback: rule-based if-else tree (used when LLM fails or OPENAI_API_KEY absent).
+Fallback: rule-based if-else tree (used when LLM fails or GROQ_API_KEY absent).
 
 Bootstrap (iteration 0) always uses the rule-based path — no LLM needed there.
 """
@@ -62,7 +62,7 @@ def generate(state: StateObject) -> list[CandidateAction]:
     """Return candidate actions for the current state."""
     if state.meta.iteration == 0:
         return _bootstrap_candidates(state)
-    if os.getenv("OPENAI_API_KEY"):
+    if os.getenv("GROQ_API_KEY"):
         result = _llm_candidates(state)
         if result is not None:
             return result
@@ -107,7 +107,7 @@ class _CandidateList(BaseModel):
 
 def _llm_candidates(state: StateObject) -> Optional[list[CandidateAction]]:
     try:
-        from langchain_openai import ChatOpenAI
+        from langchain_groq import ChatGroq
         from langchain_core.messages import HumanMessage, SystemMessage
 
         sig = state.signals
@@ -133,7 +133,7 @@ def _llm_candidates(state: StateObject) -> Optional[list[CandidateAction]]:
             "Propose 2-4 candidate actions as a JSON list. Each must have action_type and parameters."
         )
 
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2).with_structured_output(_CandidateList)
+        llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.2).with_structured_output(_CandidateList)
         output: _CandidateList = llm.invoke([SystemMessage(_SYSTEM_PROMPT), HumanMessage(human)])
 
         # Validate and filter
