@@ -5,11 +5,12 @@ Decision/Policy — Action Selection Policy.
 
 Picks the top-ranked action from the coordinator's output and
 builds the final ActionDecision returned to Team A.
+
+When the coordinator used the LLM path, reason.source is "learned" and
+the coordinator's rationale is stored in reason.evidence["rationale"].
 """
 
 from __future__ import annotations
-
-from datetime import datetime, timezone
 
 from stratml.core.schemas import (
     ActionDecision,
@@ -35,6 +36,11 @@ def select(state: StateObject, ranked: list[RankedAction]) -> ActionDecision:
     trigger = _infer_trigger(state)
     evidence = _build_evidence(state)
 
+    # If the coordinator produced a rationale, the LLM path was taken
+    source = "learned" if best.rationale else "rule"
+    if best.rationale:
+        evidence["rationale"] = best.rationale
+
     return ActionDecision(
         experiment_id=state.meta.experiment_id,
         iteration=state.meta.iteration,
@@ -48,7 +54,7 @@ def select(state: StateObject, ranked: list[RankedAction]) -> ActionDecision:
         reason=DecisionReason(
             trigger=trigger,
             evidence=evidence,
-            source="rule",
+            source=source,
         ),
     )
 

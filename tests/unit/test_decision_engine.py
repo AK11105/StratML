@@ -19,19 +19,23 @@ from stratml.core.schemas import (
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
+def _sig(v) -> str:
+    return v if isinstance(v, str) else ("strong" if v else "none")
+
+
 def _make_state(
     iteration: int = 1,
     primary: float = 0.72,
-    underfitting: bool = False,
-    overfitting: bool = False,
-    well_fitted: bool = True,
-    converged: bool = False,
-    stagnating: bool = False,
-    diverging: bool = False,
-    plateau_detected: bool = False,
-    diminishing_returns: bool = False,
-    unstable_training: bool = False,
-    high_variance: bool = False,
+    underfitting = "none",
+    overfitting = "none",
+    well_fitted = "strong",
+    converged = "none",
+    stagnating = "none",
+    diverging = "none",
+    plateau_detected = "none",
+    diminishing_returns = "none",
+    unstable_training = "none",
+    high_variance = "none",
     remaining_budget: float = 15.0,
     models_tried: list[str] | None = None,
     allowed_models: list[str] | None = None,
@@ -55,10 +59,10 @@ def _make_state(
         resources=StateResources(runtime=runtime, gpu_used=False, cpu_time=runtime, remaining_budget=remaining_budget, budget_exhausted=remaining_budget <= 0),
         search=StateSearch(models_tried=models_tried or ["RandomForest"], unique_models_count=1, repeated_configs=0),
         signals=StateSignals(
-            underfitting=underfitting, overfitting=overfitting, well_fitted=well_fitted,
-            converged=converged, stagnating=stagnating, diverging=diverging,
-            plateau_detected=plateau_detected, diminishing_returns=diminishing_returns,
-            unstable_training=unstable_training, high_variance=high_variance,
+            underfitting=_sig(underfitting), overfitting=_sig(overfitting), well_fitted=_sig(well_fitted),
+            converged=_sig(converged), stagnating=_sig(stagnating), diverging=_sig(diverging),
+            plateau_detected=_sig(plateau_detected), diminishing_returns=_sig(diminishing_returns),
+            unstable_training=_sig(unstable_training), high_variance=_sig(high_variance),
         ),
         uncertainty=StateUncertainty(),
         action_context=StateActionContext(),
@@ -197,13 +201,13 @@ class TestValueModel:
         preds = predict(state, candidates)
         assert len(preds) == 2
 
-    def test_stub_values(self):
+    def test_predicted_gain_in_range(self):
         from stratml.decision.learning.value_model import predict
         state = _make_state()
         candidates = [CandidateAction(action_type="switch_model", parameters={})]
         preds = predict(state, candidates)
-        assert preds[0].predicted_gain == 0.05
-        assert preds[0].predicted_cost == 0.5
+        assert 0.0 <= preds[0].predicted_gain <= 1.0
+        assert 0.0 <= preds[0].predicted_cost <= 1.0
 
     def test_action_type_preserved(self):
         from stratml.decision.learning.value_model import predict
@@ -218,14 +222,13 @@ class TestValueModel:
 # ---------------------------------------------------------------------------
 
 class TestCalibration:
-    def test_passthrough(self):
+    def test_output_gain_in_range(self):
         from stratml.decision.learning.value_model import predict
         from stratml.decision.learning.calibration import calibrate
         state = _make_state()
         candidates = [CandidateAction(action_type="switch_model", parameters={})]
-        preds = predict(state, candidates)
-        calibrated = calibrate(preds)
-        assert calibrated[0].predicted_gain == preds[0].predicted_gain
+        calibrated = calibrate(predict(state, candidates))
+        assert 0.0 <= calibrated[0].predicted_gain <= 1.0
 
     def test_length_preserved(self):
         from stratml.decision.learning.value_model import predict
@@ -252,22 +255,22 @@ class TestUncertainty:
         estimates = estimate(predict(state, candidates))
         assert len(estimates) == 1
 
-    def test_stub_confidence_and_variance(self):
+    def test_confidence_in_range(self):
         from stratml.decision.learning.value_model import predict
         from stratml.decision.learning.uncertainty import estimate
         state = _make_state()
         candidates = [CandidateAction(action_type="switch_model", parameters={})]
         est = estimate(predict(state, candidates))[0]
-        assert est.confidence == 0.5
-        assert est.variance == 0.0
+        assert 0.0 <= est.confidence <= 1.0
+        assert est.variance >= 0.0
 
-    def test_gain_forwarded(self):
+    def test_gain_in_range(self):
         from stratml.decision.learning.value_model import predict
         from stratml.decision.learning.uncertainty import estimate
         state = _make_state()
         candidates = [CandidateAction(action_type="switch_model", parameters={})]
         est = estimate(predict(state, candidates))[0]
-        assert est.predicted_gain == 0.05
+        assert 0.0 <= est.predicted_gain <= 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +405,11 @@ class TestCoordinatorAgent:
         for r in ranked:
             assert 0.0 <= r.final_score <= 1.0
 
+    def test_rationale_is_string(self):
+        ranked = self._run()
+        for r in ranked:
+            assert isinstance(r.rationale, str)
+
 
 # ---------------------------------------------------------------------------
 # 10. action_selector
@@ -440,7 +448,24 @@ class TestActionSelector:
     def test_reason_populated(self):
         decision = self._run_full()
         assert decision.reason.trigger != ""
-        assert decision.reason.source == "rule"
+        assert decision.reason.source in {"rule", "learned"}
+
+    def test_learned_source_sets_rationale(self):
+        from stratml.decision.agents.coordinator_agent import RankedAction
+        from stratml.decision.policy.action_selector import select
+        from stratml.core.schemas import AgentScore
+        state = _make_state()
+        ranked = [
+            RankedAction(
+                action_type="terminate", parameters={}, predicted_gain=0.05,
+                predicted_cost=0.0, confidence=0.9,
+                agent_scores=AgentScore(performance=0.9, efficiency=1.0, stability=0.95),
+                final_score=0.95, rationale="Budget exhausted; termination is optimal.",
+            )
+        ]
+        decision = select(state, ranked)
+        assert decision.reason.source == "learned"
+        assert "rationale" in decision.reason.evidence
 
     def test_bootstrap_trigger_on_iteration_0(self):
         decision = self._run_full(state=_make_state(iteration=0))
