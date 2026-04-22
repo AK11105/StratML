@@ -7,6 +7,15 @@ All command logic lives in cli/commands/.
 All config logic lives in cli/config.py.
 """
 
+import sys
+from pathlib import Path
+
+# Ensure project root is importable when invoked as a script (e.g. via the
+# shell wrapper installed by install.sh: `python stratml/cli/main.py ...`)
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")

@@ -28,6 +28,11 @@ Example:
 stratml validate-config config.yaml
 ```
 
+Checks:
+- `dataset.path` is set
+- `dataset.target_column` is set
+- `mode` is one of `beginner`, `intermediate`, `expert`
+
 ---
 
 ## profile-data
@@ -45,11 +50,13 @@ Example:
 stratml profile-data data/iris.csv species
 ```
 
+Output includes: shape, problem type, feature types, missing ratio, class distribution, per-feature distribution.
+
 ---
 
 ## run
 
-Run the AutoML pipeline using a config file.
+Run the full AutoML pipeline.
 
 ```bash
 stratml run <config> [options]
@@ -61,40 +68,48 @@ Example:
 stratml run config.yaml
 ```
 
-Optional flags:
+### Options
 
 ```
---path <dataset>               override dataset path from config
+--path <dataset>                 Override dataset.path from config
 --mode <beginner|intermediate|expert>
---max-iter <n>                 override max iterations
---dry-run                      print resolved config without running
---dl                           enable deep learning mode (PyTorch)
---architecture <MLP|CNN1D|RNN> DL architecture (default: MLP)
---epochs <n>                   number of training epochs (default: 20)
---lr <float>                   learning rate (default: 0.001)
---batch-size <n>               batch size (default: 32)
+--max-iter <n>                   Override execution.max_iterations
+--dry-run                        Print resolved config without executing
+--dl                             Enable deep learning mode (PyTorch)
+--architecture <MLP|CNN1D|RNN>   DL architecture (default: MLP)
+--epochs <n>                     DL training epochs (default: 20)
+--lr <float>                     DL learning rate (default: 0.001)
+--batch-size <n>                 DL batch size (default: 32)
 ```
 
-Dry run example:
+### Dry run
 
 ```bash
-stratml run config.yaml --dry-run
+stratml run config.yaml --path data/iris.csv --dry-run
 ```
 
-Deep learning examples:
+Prints the fully resolved config (after YAML + CLI overrides) without running anything.
+
+### ML pipeline (default)
 
 ```bash
-# Run with default MLP architecture
+stratml run config.yaml
+```
+
+### DL pipeline
+
+```bash
+# Default MLP
 stratml run config.yaml --dl
 
-# Run with CNN1D, custom epochs and learning rate
+# CNN1D with custom epochs and LR
 stratml run config.yaml --dl --architecture CNN1D --epochs 50 --lr 0.0005
 
-# Run with RNN, dry-run to preview config
-stratml run config.yaml --dl --architecture RNN --epochs 30 --dry-run
+# RNN
+stratml run config.yaml --dl --architecture RNN --epochs 30 --batch-size 64
 ```
 
-DL mode can also be enabled via `config.yaml`:
+DL mode can also be set permanently in `config.yaml`:
 
 ```yaml
 deep_learning:
@@ -105,21 +120,44 @@ deep_learning:
   batch_size: 32
 ```
 
+### Outputs
+
+After a run, outputs are written to `outputs/<run_id>/`:
+
+```
+outputs/<run_id>/
+  report.pdf              ← PDF execution report
+  comparison.csv          ← per-iteration metrics table
+  comparison.json         ← same, as JSON
+  artifacts/
+    model.pkl             ← best model (joblib)
+    model.pth             ← best DL model state_dict (PyTorch only)
+    model.py              ← auto-generated inference script
+    metrics.json          ← final metrics
+    config.json           ← experiment config
+  decision_logs/          ← per-iteration decision records (JSON)
+  tensorboard/            ← TensorBoard event files (DL only)
+```
+
+At the end of a run you are prompted to download `model.pkl` + `model.py` to the current directory.
+
 ---
 
 ## doctor
 
-Check that all required packages are installed.
+Check that all required packages are installed and show their versions.
 
 ```bash
 stratml doctor
 ```
 
+Checks: `pandas`, `numpy`, `sklearn`, `torch`, `pydantic`, `mlflow`, `yaml`
+
 ---
 
 ## Argument Style
 
-All commands use **positional arguments** — no `--input` or `--config` flags needed.
+All commands use positional arguments — no `--input` or `--config` flags needed.
 
 | Command | Positional args |
 |---|---|
