@@ -2,7 +2,22 @@
 
 ## Overview
 
-`stratml/execution/pipelines/dl_pipeline.py` is a single entry point (`run_dl_pipeline`) that handles all PyTorch training. The architecture and task are controlled entirely through `config.hyperparameters` — no code changes needed to switch between them.
+`stratml/execution/pipelines/dl_pipeline.py` is the single entry point (`run_dl_pipeline`)
+for all PyTorch training. Architecture, task, and training behaviour are controlled
+entirely through `config.hyperparameters` — no code changes needed to switch between them.
+
+---
+
+## Device Selection
+
+The pipeline automatically selects the best available device:
+
+```
+CUDA (NVIDIA GPU)  →  MPS (Apple Silicon)  →  CPU
+```
+
+`DLPipelineResult.device_used` reports which device was used. `ResourceUsage.gpu_used`
+is set to `True` when CUDA or MPS is active.
 
 ---
 
@@ -10,12 +25,13 @@
 
 Set via `config.hyperparameters["task"]`:
 
-| Value | Loss function | Output layer | Prediction |
+| Value | Loss | Output | Prediction |
 |---|---|---|---|
-| `"classification"` (default) | CrossEntropyLoss | Linear → N classes | argmax → decoded label |
+| `"classification"` (default) | CrossEntropyLoss | Linear → N classes | argmax → decoded original label |
 | `"regression"` | MSELoss | Linear → 1 neuron | raw float |
 
-For classification, labels are encoded to 0-based integers internally and decoded back to original values before returning predictions. Team B and the metrics engine never see the encoded integers.
+Labels are encoded to 0-based integers internally and decoded back before returning
+predictions. The metrics engine and decision engine never see encoded integers.
 
 ---
 
@@ -25,46 +41,54 @@ Set via `config.hyperparameters["architecture"]`:
 
 ### MLP (default)
 
-Fully connected network. Best for standard tabular data.
+Fully-connected network for standard tabular data.
 
 ```
-Input (features)
-    ↓
-[Linear → ReLU → Dropout] × layers
-    ↓
-Linear → output
+Input (F features)
+  ↓
+[Linear(H) → BatchNorm(H) → ReLU → Dropout] × L layers
+  ↓
+Linear(output_dim)
 ```
 
-Hyperparameters: `hidden_units`, `layers`, `dropout`
+BatchNorm is applied per layer when `batch_norm=True` (default: off).
+Hyperparameters: `hidden_units`, `layers`, `dropout`, `batch_norm`
+
+---
 
 ### CNN1D
 
-1-D convolutional network. Treats the feature vector as a sequence — useful when features have local structure (e.g. ordered sensor readings, time-windowed features).
+1-D convolutional network. Treats the feature vector as a 1-channel sequence of
+length F. Useful when features have local or spatial structure (e.g. ordered sensor
+readings, windowed time-series features).
 
 ```
-Input (batch, features)
-    ↓  unsqueeze → (batch, 1, features)
-Conv1d(1 → hidden_units, kernel=3)  → ReLU → Dropout
-Conv1d(hidden_units → hidden_units//2, kernel=3)  → ReLU
-    ↓  flatten
-Linear → output
+Input (batch, F)
+  ↓  unsqueeze  →  (batch, 1, F)
+Conv1d(1 → H, kernel=3, pad=1)  →  [BatchNorm]  →  ReLU  →  Dropout
+Conv1d(H → H//2, kernel=3, pad=1)  →  [BatchNorm]  →  ReLU
+  ↓  flatten  →  (batch, H//2 * F)
+Linear(output_dim)
 ```
 
-Hyperparameters: `hidden_units`, `dropout`
+Hyperparameters: `hidden_units`, `dropout`, `batch_norm`
+
+---
 
 ### RNN (LSTM)
 
-LSTM-based network. Treats each feature as a time step of a single-channel sequence. Useful when features represent a temporal or ordered progression.
+LSTM-based network. Each feature is treated as a time step of a single-channel
+sequence. Suitable when features represent a temporal or ordered progression.
 
 ```
-Input (batch, features)
-    ↓  unsqueeze → (batch, features, 1)
-LSTM(input=1, hidden=hidden_units, num_layers=layers)
-    ↓  last time step hidden state
-Linear → output
+Input (batch, F)
+  ↓  unsqueeze  →  (batch, F, 1)
+LSTM(input=1, hidden=H, num_layers=L, dropout between layers)
+  ↓  last hidden state
+Linear(output_dim)
 ```
 
-Hyperparameters: `hidden_units`, `layers`, `dropout` (applied between LSTM layers when layers > 1)
+Hyperparameters: `hidden_units`, `layers`, `dropout`
 
 ---
 
@@ -76,36 +100,141 @@ Hyperparameters: `hidden_units`, `layers`, `dropout` (applied between LSTM layer
 | `task` | str | `"classification"` | `"classification"` or `"regression"` |
 | `hidden_units` | int | `64` | Width of hidden layers |
 | `layers` | int | `2` | Depth (MLP: FC layers, RNN: LSTM layers) |
-| `dropout` | float | `0.0` | Dropout probability |
-| `learning_rate` | float | `1e-3` | Adam optimizer LR |
+| `dropout` | float | `0.0` | Dropout probability (0.0 = disabled) |
+| `batch_norm` | bool | `False` | BatchNorm after each hidden layer (MLP, CNN1D) |
+| `learning_rate` | float | `1e-3` | Adam initial learning rate |
 | `batch_size` | int | `32` | Mini-batch size |
-| `epochs` | int | `20` | Max training epochs |
+| `epochs` | int | `20` | Maximum training epochs |
+| `scheduler` | str | `"plateau"` | LR scheduler: `"plateau"`, `"cosine"`, or `"none"` |
+
+---
+
+## Learning Rate Schedulers
+
+Controlled via `config.hyperparameters["scheduler"]`:
+
+| Value | Behaviour |
+|---|---|
+| `"plateau"` (default) | `ReduceLROnPlateau` — halves LR when val loss stops improving for 3 epochs |
+| `"cosine"` | `CosineAnnealingLR` — smoothly decays LR to 0 over `epochs` |
+| `"none"` | Fixed LR throughout training |
+
+The `change_optimizer` action automatically switches to `"cosine"` when the LR scale
+factor is ≤ 0.1 (aggressive reduction).
 
 ---
 
 ## Early Stopping
 
-Controlled by `ExperimentConfig.early_stopping` and `early_stopping_patience`.
+Early stopping is **always active** for DL models. The patience is set via
+`ExperimentConfig.early_stopping_patience` (default: 5).
 
 - Monitors validation loss each epoch
 - Stops if val loss doesn't improve by more than `1e-4` for `patience` consecutive epochs
-- `train_curve` and `val_curve` will be shorter than `epochs` when triggered
+- **Best weights are restored** after stopping — the model returned is the one from the
+  epoch with the lowest validation loss, not the final epoch
+- `DLPipelineResult.early_stopped` is `True` when triggered
+- `DLPipelineResult.epochs_run` reports how many epochs actually ran
 
-```json
+---
+
+## TensorBoard Integration
+
+Pass `tensorboard_log_dir` to `run_dl_pipeline` to write training curves:
+
+```python
+result = run_dl_pipeline(config, data_split, tensorboard_log_dir="outputs/runs/exp_001")
+```
+
+This writes `Loss/train` and `Loss/val` scalars per epoch. View with:
+
+```bash
+tensorboard --logdir outputs/runs/
+```
+
+The orchestrator automatically sets this to `outputs/<run_id>/tensorboard/<experiment_id>/`
+for every DL run.
+
+---
+
+## Artifact Saving
+
+For DL models, two model files are saved:
+
+| File | Format | Use |
+|---|---|---|
+| `model.pkl` | joblib | Used by `model.py` script and report generator |
+| `model.pth` | `torch.save` of state_dict + metadata | Proper PyTorch format for resuming training |
+
+The `.pth` file contains:
+```python
 {
-  "action_type": "early_stop",
-  "parameters": {
-    "model_name": "MLP",
-    "early_stopping_patience": 5
-  }
+    "state_dict":      model.state_dict(),   # weights
+    "architecture":    "MLP",                # arch string
+    "hyperparameters": {...},                # full hp dict
+    "experiment_id":   "exp_001",
 }
 ```
+
+To load and resume:
+```python
+import torch
+checkpoint = torch.load("model.pth")
+# rebuild model with same arch + hp, then:
+model.load_state_dict(checkpoint["state_dict"])
+```
+
+---
+
+## Capacity Mutations (Decision Engine Actions)
+
+The config builder handles DL capacity actions differently from ML:
+
+| Action | DL behaviour | ML behaviour |
+|---|---|---|
+| `increase_model_capacity` | `hidden_units × scale`; adds a layer if `scale ≥ 1.5` | `n_estimators × scale` |
+| `decrease_model_capacity` | `hidden_units × scale` (min 16); removes a layer if `scale ≤ 0.75` | `n_estimators × scale` (min 10) |
+| `modify_regularization` | Adjusts `dropout` by ±0.1 (clamped 0.0–0.5) | Adjusts `C` / `alpha` / `max_depth` |
+| `change_optimizer` | Scales `learning_rate`; sets `scheduler="cosine"` if scale ≤ 0.1 | No-op (sklearn has no LR) |
+
+---
+
+## DLPipelineResult
+
+```python
+@dataclass
+class DLPipelineResult:
+    model: nn.Module          # trained model (moved to CPU)
+    y_val_pred: np.ndarray    # predictions on val set (decoded labels or floats)
+    train_curve: list[float]  # per-epoch training loss
+    val_curve: list[float]    # per-epoch validation loss
+    runtime: float            # wall-clock seconds
+    device_used: str          # "cuda", "mps", or "cpu"
+    epochs_run: int           # actual epochs completed (< epochs if early stopped)
+    early_stopped: bool       # True if early stopping triggered
+    model_state: dict         # state_dict on CPU — used for .pth saving
+```
+
+`train_curve` and `val_curve` are always the same length (`epochs_run`).
+
+---
+
+## Architecture Selection Guide
+
+| Scenario | Recommended |
+|---|---|
+| Standard tabular, no feature ordering | MLP |
+| Features have local / spatial structure | CNN1D |
+| Features represent a time sequence | RNN |
+| Regression on tabular data | MLP with `task: regression` |
+| Fast DL baseline | MLP, `hidden_units: 32`, `layers: 1`, `epochs: 10` |
+| Regularisation needed | MLP with `dropout: 0.3` or `batch_norm: true` |
 
 ---
 
 ## Example ActionDecisions
 
-**MLP classification (default):**
+**MLP classification with BatchNorm:**
 ```json
 {
   "action_type": "switch_model",
@@ -114,8 +243,10 @@ Controlled by `ExperimentConfig.early_stopping` and `early_stopping_patience`.
     "hidden_units": 128,
     "layers": 3,
     "dropout": 0.2,
+    "batch_norm": true,
     "learning_rate": 0.001,
-    "epochs": 50
+    "epochs": 50,
+    "scheduler": "plateau"
   }
 }
 ```
@@ -129,55 +260,25 @@ Controlled by `ExperimentConfig.early_stopping` and `early_stopping_patience`.
     "task": "regression",
     "hidden_units": 64,
     "dropout": 0.1,
-    "epochs": 30
+    "epochs": 30,
+    "scheduler": "cosine"
   }
 }
 ```
 
-**RNN classification with early stopping:**
+**RNN classification:**
 ```json
 {
-  "action_type": "early_stop",
+  "action_type": "switch_model",
   "parameters": {
     "model_name": "RNN",
     "task": "classification",
     "hidden_units": 32,
     "layers": 2,
-    "epochs": 100,
-    "early_stopping_patience": 7
+    "epochs": 100
   }
 }
 ```
-
----
-
-## Output
-
-All architectures and tasks return the same `DLPipelineResult`:
-
-```python
-@dataclass
-class DLPipelineResult:
-    model: nn.Module          # trained PyTorch model
-    y_val_pred: np.ndarray    # predictions on val set (decoded labels or floats)
-    train_curve: list[float]  # per-epoch training loss
-    val_curve: list[float]    # per-epoch validation loss
-    runtime: float            # wall-clock seconds
-```
-
-`train_curve` and `val_curve` are always the same length (number of epochs actually run).
-
----
-
-## Architecture Selection Guide
-
-| Scenario | Recommended |
-|---|---|
-| Standard tabular, no feature ordering | MLP |
-| Features have local/spatial structure | CNN1D |
-| Features represent a time sequence | RNN |
-| Regression on tabular data | MLP with `task: regression` |
-| Fast baseline DL run | MLP, `hidden_units: 32`, `layers: 1`, `epochs: 10` |
 
 ---
 
@@ -187,13 +288,15 @@ Add a new `nn.Module` class and register it in `_build_model`:
 
 ```python
 class _Transformer(nn.Module):
-    ...
+    def __init__(self, input_dim, output_dim, hidden_units, layers, dropout):
+        ...
 
 def _build_model(arch, input_dim, output_dim, hp):
     if arch == "TRANSFORMER":
-        return _Transformer(input_dim, output_dim, hp)
+        return _Transformer(input_dim, output_dim, ...)
     if arch == "CNN1D":
         ...
 ```
 
-No changes needed in the orchestrator, config builder, or metrics engine.
+Add `"TRANSFORMER"` to `_DL_MODELS` in `experiment_config_builder.py`. No other
+changes needed in the orchestrator, metrics engine, or decision engine.
