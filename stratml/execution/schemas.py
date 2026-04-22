@@ -47,60 +47,22 @@ class DataProfile(BaseModel):
     class_distribution: dict[str, int] = Field(default_factory=dict)
     feature_summary: list[FeatureInfo]
     recommended_metrics: list[str]
+    imbalance_ratio: Optional[float] = None       # max_class / min_class count
+    feature_variance_mean: Optional[float] = None  # mean variance across numerical features
+    class_entropy: Optional[float] = None          # entropy of class distribution
 
 
 # PreprocessingConfig imported from stratml.core.schemas
 
 
-class ExperimentMetrics(BaseModel):
-    accuracy: Optional[float] = None
-    f1_score: Optional[float] = None
-    precision: Optional[float] = None
-    recall: Optional[float] = None
-    train_loss: Optional[float] = None
-    validation_loss: Optional[float] = None
-    mse: Optional[float] = None
-    rmse: Optional[float] = None
-    r2: Optional[float] = None
-
-
-class ResourceUsage(BaseModel):
-    gpu_used: bool = False
-    gpu_memory_gb: float = 0.0
-    cpu_time_sec: float = 0.0
-
-
-class ArtifactRefs(BaseModel):
-    model_path: str
-    metrics_file: str
-    tensorboard_logs: str
-
-
-class ExperimentResult(BaseModel):
-    experiment_id: str
-    iteration: int
-    dataset_name: str
-    model_name: str
-    model_type: str = Field(..., pattern="^(ml|dl)$")
-    hyperparameters: dict
-    preprocessing_applied: PreprocessingConfig
-    metrics: ExperimentMetrics
-    train_curve: list[float]
-    validation_curve: list[float]
-    runtime: float
-    resource_usage: ResourceUsage
-    artifacts: ArtifactRefs
-
-
-class ActionDecision(BaseModel):
-    experiment_id: str
-    action_type: str
-    parameters: dict
-    preprocessing: PreprocessingConfig
-    reason: str
-    expected_gain: float
-    expected_cost: float
-    confidence: float = Field(..., ge=0.0, le=1.0)
+# Re-exported from core — single source of truth (todo #4)
+from stratml.core.schemas import (  # noqa: F401
+    ExperimentMetrics,
+    ResourceUsage,
+    ArtifactRefs,
+    ExperimentResult,
+    ActionDecision,
+)
 
 
 class SplitConfig(BaseModel):
@@ -118,6 +80,7 @@ class ExperimentConfig(BaseModel):
     preprocessing: PreprocessingConfig
     early_stopping: bool = False
     early_stopping_patience: int = 5
+    tune: bool = False  # when True, ml_pipeline runs RandomizedSearchCV
 
 
 @dataclass

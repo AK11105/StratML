@@ -35,6 +35,7 @@ def main() -> None:
     run.add_argument("--max-iter", type=int)
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("--dl", action="store_true")
+    run.add_argument("--tune", action="store_true", help="Enable RandomizedSearchCV for ML models")
     run.add_argument("--architecture", choices=["MLP", "CNN1D", "RNN"])
     run.add_argument("--epochs", type=int)
     run.add_argument("--lr", type=float)

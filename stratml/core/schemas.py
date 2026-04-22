@@ -24,8 +24,8 @@ Cross-team boundary rule
 
 from __future__ import annotations
 
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Annotated, Optional, Union
+from pydantic import BaseModel, BeforeValidator, Field
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ class PreprocessingConfig(BaseModel):
     """Preprocessing decisions — embedded in both ActionDecision and ExperimentResult."""
 
     missing_value_strategy: str = Field(..., pattern="^(mean|median|mode|drop)$")
-    scaling: str = Field(..., pattern="^(standard|minmax|none)$")
+    scaling: str = Field(..., pattern="^(standard|minmax|robust|none)$")
     encoding: str = Field(..., pattern="^(onehot|label|none)$")
     imbalance_strategy: str = Field(..., pattern="^(oversample|undersample|none)$")
     feature_selection: str = Field(..., pattern="^(variance_threshold|none)$")
@@ -114,9 +114,18 @@ class BootstrapContext(BaseModel):
 
 
 class DecisionReason(BaseModel):
-    trigger: str          # e.g. "underfitting", "convergence", "bootstrap"
-    evidence: dict        # key signals that drove the decision
-    source: str = Field(..., pattern="^(bootstrap|rule|learned)$")
+    trigger: str
+    evidence: dict = Field(default_factory=dict)
+    source: str = Field(default="rule", pattern="^(bootstrap|rule|learned)$")
+
+
+def _coerce_reason(v):
+    if isinstance(v, str):
+        return {"trigger": v, "evidence": {}, "source": "rule"}
+    return v
+
+
+ReasonField = Annotated[DecisionReason, BeforeValidator(_coerce_reason)]
 
 
 class AgentScore(BaseModel):
@@ -133,7 +142,7 @@ class ActionDecision(BaseModel):
 
     # --- identification ---
     experiment_id: str
-    iteration: int
+    iteration: int = 0
 
     # --- action ---
     action_type: str
@@ -147,14 +156,14 @@ class ActionDecision(BaseModel):
 
     # --- decision intelligence ---
     expected_gain: Optional[float] = None
-    expected_cost: float
+    expected_cost: float = 0.0
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
     # --- multi-agent scores ---
     agent_scores: AgentScore = Field(default_factory=AgentScore)
 
     # --- structured reason ---
-    reason: DecisionReason
+    reason: ReasonField
 
 
 # ---------------------------------------------------------------------------

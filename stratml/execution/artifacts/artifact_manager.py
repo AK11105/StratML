@@ -31,6 +31,7 @@ def save_artifacts(
     tensorboard_log_dir: str | None = None,
     artifacts_root: Path | None = None,
     dl_result=None,  # DLPipelineResult | None — passed for .pth saving
+    enable_mlflow: bool = False,
 ) -> ArtifactRefs:
     """Save model + metrics + config to disk. Return ArtifactRefs."""
     root    = artifacts_root or (_ARTIFACTS_ROOT / experiment_id)
@@ -67,6 +68,17 @@ def save_artifacts(
 
     # ── TensorBoard log dir ───────────────────────────────────────────────────
     tb_dir = tensorboard_log_dir or str(_RUNS_ROOT / experiment_id)
+
+    if enable_mlflow:
+        try:
+            import mlflow
+            with mlflow.start_run(run_name=experiment_id):
+                mlflow.log_metrics({k: v for k, v in metrics.model_dump().items() if v is not None})
+                mlflow.log_artifact(model_path)
+                mlflow.log_artifact(metrics_path)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("MLflow logging failed: %s", exc)
 
     return ArtifactRefs(
         model_path=model_path,
