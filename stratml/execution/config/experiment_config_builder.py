@@ -112,12 +112,16 @@ def build_experiment_config(action: ActionDecision) -> ExperimentConfig:
             hyperparameters["n_estimators"] = max(10, int(n * scale))
 
     elif action_type == "change_optimizer":
-        lr_scale = float(hyperparameters.pop("learning_rate_scale", 0.1))
-        lr = float(hyperparameters.get("learning_rate", 1e-3))
+        lr_scale     = float(hyperparameters.pop("learning_rate_scale", 0.1))
+        lr           = float(hyperparameters.get("learning_rate", 1e-3))
         hyperparameters["learning_rate"] = round(lr * lr_scale, 8)
-        # Also switch scheduler to cosine when reducing LR aggressively
+        # Aggressive LR reduction → switch to cosine annealing
         if lr_scale <= 0.1:
             hyperparameters.setdefault("scheduler", "cosine")
+        # Optionally bump weight_decay when reducing LR (more regularization)
+        if model_type == "dl" and lr_scale <= 0.1:
+            wd = float(hyperparameters.get("weight_decay", 0.0))
+            hyperparameters["weight_decay"] = round(min(wd + 1e-4, 1e-2), 6)
 
     elif action_type in ("apply_preprocessing", "early_stop"):
         pass

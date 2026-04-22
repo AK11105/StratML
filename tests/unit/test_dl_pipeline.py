@@ -244,7 +244,109 @@ class TestTensorBoard:
         assert r.epochs_run > 0
 
 
-# ── Config builder — DL capacity mutations ────────────────────────────────────
+# ── Gradient clipping ─────────────────────────────────────────────────────────
+
+class TestGradientClipping:
+    def test_grad_clip_enabled_runs(self, clf_split):
+        r = run_dl_pipeline(_config(grad_clip=1.0), clf_split)
+        assert r.epochs_run > 0
+
+    def test_grad_clip_disabled_runs(self, clf_split):
+        r = run_dl_pipeline(_config(grad_clip=0.0), clf_split)
+        assert r.epochs_run > 0
+
+    def test_rnn_with_grad_clip_stable(self, clf_split):
+        # RNN is most prone to gradient explosion — clipping must not crash
+        r = run_dl_pipeline(_config("RNN", grad_clip=1.0, layers=2), clf_split)
+        assert all(np.isfinite(v) for v in r.train_curve)
+        assert all(np.isfinite(v) for v in r.val_curve)
+
+
+# ── Weight decay ──────────────────────────────────────────────────────────────
+
+class TestWeightDecay:
+    def test_weight_decay_zero_runs(self, clf_split):
+        r = run_dl_pipeline(_config(weight_decay=0.0), clf_split)
+        assert r.epochs_run > 0
+
+    def test_weight_decay_nonzero_runs(self, clf_split):
+        r = run_dl_pipeline(_config(weight_decay=1e-4), clf_split)
+        assert r.epochs_run > 0
+
+    def test_weight_decay_regression(self, reg_split):
+        r = run_dl_pipeline(_config(task="regression", weight_decay=1e-3), reg_split)
+        assert np.all(np.isfinite(r.y_val_pred))
+
+
+# ── Mixed precision ───────────────────────────────────────────────────────────
+
+class TestMixedPrecision:
+    def test_mixed_precision_runs_on_cpu(self, clf_split):
+        # AMP is silently disabled on CPU — must not crash
+        r = run_dl_pipeline(_config(mixed_precision=True), clf_split)
+        assert r.epochs_run > 0
+
+    def test_mixed_precision_false_runs(self, clf_split):
+        r = run_dl_pipeline(_config(mixed_precision=False), clf_split)
+        assert r.epochs_run > 0
+
+
+# ── Lazy DataLoader ───────────────────────────────────────────────────────────
+
+class TestLazyDataLoader:
+    def test_large_batch_size_runs(self, clf_split):
+        # batch_size > dataset size — DataLoader handles gracefully
+        r = run_dl_pipeline(_config(batch_size=512), clf_split)
+        assert len(r.y_val_pred) == len(clf_split.y_val)
+
+    def test_batch_size_1_runs(self, clf_split):
+        r = run_dl_pipeline(_config(batch_size=1, epochs=2), clf_split)
+        assert r.epochs_run > 0
+
+    def test_tabular_dataset_len(self, clf_split):
+        from stratml.execution.pipelines.dl_pipeline import _TabularDataset
+        import numpy as np
+        X = clf_split.X_train.values.astype(np.float32)
+        y = np.zeros(len(X), dtype=np.int64)
+        ds = _TabularDataset(X, y)
+        assert len(ds) == len(X)
+
+    def test_tabular_dataset_getitem_shapes(self, clf_split):
+        from stratml.execution.pipelines.dl_pipeline import _TabularDataset
+        import numpy as np
+        X = clf_split.X_train.values.astype(np.float32)
+        y = np.zeros(len(X), dtype=np.int64)
+        ds = _TabularDataset(X, y)
+        xb, yb = ds[0]
+        assert xb.shape == (X.shape[1],)
+        assert yb.shape == ()
+
+
+# ── Config builder — weight_decay in change_optimizer ────────────────────────
+
+class TestChangeOptimizerWeightDecay:
+    def _action(self, **params):
+        from stratml.execution.schemas import ActionDecision
+        return ActionDecision(
+            experiment_id="wd_test",
+            action_type="change_optimizer",
+            parameters={"model_name": "MLP", "learning_rate": 0.01,
+                        "learning_rate_scale": 0.05, **params},
+            preprocessing=_PREP,
+            reason="test",
+            expected_gain=0.0,
+            expected_cost=0.5,
+            confidence=1.0,
+        )
+
+    def test_aggressive_lr_scale_sets_weight_decay(self):
+        cfg = build_experiment_config(self._action())
+        # lr_scale=0.05 <= 0.1 → weight_decay should be bumped
+        assert cfg.hyperparameters.get("weight_decay", 0.0) > 0.0
+
+    def test_weight_decay_capped_at_1e2(self):
+        cfg = build_experiment_config(self._action(weight_decay=1e-2))
+        assert cfg.hyperparameters.get("weight_decay", 0.0) <= 1e-2
 
 class TestDLCapacityMutations:
     def _dl_action(self, action_type, **params):
