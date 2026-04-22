@@ -66,3 +66,29 @@ class TestResultBuilder:
         # If Pydantic validation fails it raises — this just confirms it doesn't
         result = _build(base_config)
         assert result.model_dump() is not None
+
+    def test_early_stopped_none_by_default(self, base_config):
+        result = _build(base_config)
+        assert result.early_stopped is None
+
+    def test_best_epoch_none_by_default(self, base_config):
+        result = _build(base_config)
+        assert result.best_epoch is None
+
+    def test_early_stopped_passed_through(self, base_config):
+        result = build_experiment_result(
+            config=base_config,
+            metrics=ExperimentMetrics(accuracy=0.9),
+            train_curve=[0.5],
+            validation_curve=[0.6],
+            runtime=1.0,
+            resource_usage=ResourceUsage(),
+            artifacts=ArtifactRefs(model_path="m.pkl", metrics_file="m.json", tensorboard_logs="tb/"),
+            preprocessing_applied=base_config.preprocessing,
+            iteration=1,
+            dataset_name="test",
+            early_stopped=True,
+            best_epoch=7,
+        )
+        assert result.early_stopped is True
+        assert result.best_epoch == 7

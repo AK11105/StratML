@@ -296,12 +296,17 @@ class DLPipelineResult:
     val_curve: list[float]    # per-epoch validation loss
     runtime: float            # wall-clock seconds
     device_used: str          # "cuda", "mps", or "cpu"
-    epochs_run: int           # actual epochs completed
+    epochs_run: int           # actual epochs completed (< epochs if early stopped)
     early_stopped: bool       # True if early stopping triggered
+    best_epoch: int           # epoch index with lowest val loss (used as convergence_epoch)
     model_state: dict         # CPU state_dict — used for .pth saving
 ```
 
 `train_curve` and `val_curve` are always the same length (`epochs_run`).
+
+`best_epoch` and `early_stopped` are forwarded into `ExperimentResult` and then into
+`StateModel.convergence_epoch` / `StateModel.early_stopped` so the decision engine
+can use them for convergence and stability signal assessment.
 
 ---
 

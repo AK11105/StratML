@@ -101,6 +101,10 @@ class ExperimentResult(BaseModel):
     resource_usage: ResourceUsage
     artifacts: ArtifactRefs
 
+    # --- training metadata (DL-populated, None for ML) ---
+    early_stopped: Optional[bool] = None   # True if early stopping triggered
+    best_epoch: Optional[int] = None       # epoch index with lowest val loss
+
 
 # ---------------------------------------------------------------------------
 # Cross-team: ActionDecision  (Team B → Team A)

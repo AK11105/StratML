@@ -63,6 +63,57 @@ from stratml.core.schemas import (  # noqa: F401
     ExperimentResult,
     ActionDecision,
 )
+class ExperimentMetrics(BaseModel):
+    accuracy: Optional[float] = None
+    f1_score: Optional[float] = None
+    precision: Optional[float] = None
+    recall: Optional[float] = None
+    train_loss: Optional[float] = None
+    validation_loss: Optional[float] = None
+    mse: Optional[float] = None
+    rmse: Optional[float] = None
+    r2: Optional[float] = None
+
+
+class ResourceUsage(BaseModel):
+    gpu_used: bool = False
+    gpu_memory_gb: float = 0.0
+    cpu_time_sec: float = 0.0
+
+
+class ArtifactRefs(BaseModel):
+    model_path: str
+    metrics_file: str
+    tensorboard_logs: str
+
+
+class ExperimentResult(BaseModel):
+    experiment_id: str
+    iteration: int
+    dataset_name: str
+    model_name: str
+    model_type: str = Field(..., pattern="^(ml|dl)$")
+    hyperparameters: dict
+    preprocessing_applied: PreprocessingConfig
+    metrics: ExperimentMetrics
+    train_curve: list[float]
+    validation_curve: list[float]
+    runtime: float
+    resource_usage: ResourceUsage
+    artifacts: ArtifactRefs
+    early_stopped: Optional[bool] = None   # True if DL early stopping triggered
+    best_epoch: Optional[int] = None       # epoch with lowest val loss (DL only)
+
+
+class ActionDecision(BaseModel):
+    experiment_id: str
+    action_type: str
+    parameters: dict
+    preprocessing: PreprocessingConfig
+    reason: str
+    expected_gain: float
+    expected_cost: float
+    confidence: float = Field(..., ge=0.0, le=1.0)
 
 
 class SplitConfig(BaseModel):

@@ -170,6 +170,8 @@ class ExecutionOrchestrator:
                 preprocessing_applied=applied_preprocessing,
                 iteration=iteration,
                 dataset_name=profile.dataset_name,
+                early_stopped=dl_result.early_stopped if dl_result else None,
+                best_epoch=dl_result.best_epoch if dl_result else None,
             )
 
             # ── Budget check ──────────────────────────────────────────────────
