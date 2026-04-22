@@ -106,15 +106,22 @@ class ExecutionOrchestrator:
 
             # ── Phase 5: Train ────────────────────────────────────────────────
             t_start = time.perf_counter()
+            dl_result = None
             if config.model_type == "ml":
                 from stratml.execution.pipelines.ml_pipeline import run_ml_pipeline
                 pipeline_result = run_ml_pipeline(config, clean_split)
             else:
                 from stratml.execution.pipelines.dl_pipeline import run_dl_pipeline
-                pipeline_result = run_dl_pipeline(config, clean_split)
+                tb_dir_train = str(Path("outputs") / self.run_id / "tensorboard" / config.experiment_id)
+                pipeline_result = run_dl_pipeline(config, clean_split, tensorboard_log_dir=tb_dir_train)
+                dl_result = pipeline_result
             run_time = round(time.perf_counter() - t_start, 4)
             total_runtime += run_time
-            self.log(f"  Trained in {run_time:.2f}s")
+
+            dl_info = ""
+            if dl_result is not None:
+                dl_info = f" | device={dl_result.device_used} | epochs={dl_result.epochs_run} | early_stopped={dl_result.early_stopped}"
+            self.log(f"  Trained in {run_time:.2f}s{dl_info}")
 
             # ── Phase 6: Metrics ──────────────────────────────────────────────
             metrics = compute_metrics(
@@ -126,9 +133,8 @@ class ExecutionOrchestrator:
             )
 
             # ── Phase 7: Artifacts ────────────────────────────────────────────
-            tb_dir = None
-            if config.model_type == "dl":
-                tb_dir = f"outputs/runs/{config.experiment_id}"
+            tb_dir = str(Path("outputs") / self.run_id / "tensorboard" / config.experiment_id) \
+                if config.model_type == "dl" else None
 
             artifacts = save_artifacts(
                 experiment_id=config.experiment_id,
@@ -137,16 +143,18 @@ class ExecutionOrchestrator:
                 config=config,
                 tensorboard_log_dir=tb_dir,
                 artifacts_root=Path("outputs") / self.run_id / "artifacts",
+                dl_result=dl_result,
             )
 
             # ── Phase 8: Assemble ExperimentResult ───────────────────────────
+            gpu_used = dl_result is not None and dl_result.device_used != "cpu"
             result = build_experiment_result(
                 config=config,
                 metrics=metrics,
                 train_curve=pipeline_result.train_curve,
                 validation_curve=pipeline_result.val_curve,
                 runtime=run_time,
-                resource_usage=ResourceUsage(cpu_time_sec=run_time),
+                resource_usage=ResourceUsage(cpu_time_sec=run_time, gpu_used=gpu_used),
                 artifacts=artifacts,
                 preprocessing_applied=applied_preprocessing,
                 iteration=iteration,
