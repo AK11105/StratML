@@ -36,7 +36,7 @@ class PreprocessingConfig(BaseModel):
     """Preprocessing decisions — embedded in both ActionDecision and ExperimentResult."""
 
     missing_value_strategy: str = Field(..., pattern="^(mean|median|mode|drop)$")
-    scaling: str = Field(..., pattern="^(standard|minmax|none)$")
+    scaling: str = Field(..., pattern="^(standard|minmax|robust|none)$")
     encoding: str = Field(..., pattern="^(onehot|label|none)$")
     imbalance_strategy: str = Field(..., pattern="^(oversample|undersample|none)$")
     feature_selection: str = Field(..., pattern="^(variance_threshold|none)$")

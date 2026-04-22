@@ -18,7 +18,7 @@ tests/
     └── test_full_pipeline.py ← end-to-end loop with stub Team B
 ```
 
-**Total: 100 tests** — 27 smoke, 62 unit, 11 integration.
+**Total: 167 tests** — 27 smoke, 62 unit, 11 integration, plus decision engine unit tests.
 
 ---
 
@@ -198,5 +198,6 @@ Available to all test files automatically via pytest.
 |---|---|
 | `artifact_manager.py` | Requires disk I/O — add when testing with tmp_path fixture |
 | `dl_pipeline.py` unit tests | Covered by smoke tests; detailed unit tests (early stopping, curve length) to be added |
-| `orchestrator.py` | Requires Team B stub — add as integration test once Team B bootstrap is ready |
+| `orchestrator.py` test set evaluation | DL path not yet implemented |
 | `loader.py` format tests | JSON/Parquet/Excel require sample files — add with fixture files |
+| `tune=True` path in `ml_pipeline.py` | `RandomizedSearchCV` branch not yet covered by unit tests |

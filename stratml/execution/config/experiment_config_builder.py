@@ -24,6 +24,20 @@ _REG_PARAM: dict[str, tuple[str, float, float]] = {
     "DecisionTree":       ("max_depth", 10, -2),
 }
 
+# Capacity params per model family: list of (param, default, scale_direction)
+# scale_direction: +1 = multiply by scale to increase, -1 = divide by scale to increase
+_CAPACITY_PARAMS: dict[str, list[tuple[str, object, int]]] = {
+    "RandomForest":       [("n_estimators", 100, 1), ("max_depth", 10, 1), ("min_samples_split", 2, -1), ("max_features", "sqrt", 0)],
+    "ExtraTrees":         [("n_estimators", 100, 1), ("max_depth", 10, 1)],
+    "GradientBoosting":   [("n_estimators", 100, 1), ("learning_rate", 0.1, -1), ("subsample", 1.0, 1)],
+    "AdaBoost":           [("n_estimators", 50,  1)],
+    "DecisionTree":       [("max_depth", 5, 1)],
+    "LogisticRegression": [("max_iter", 100, 1)],
+    "SVC":                [("max_iter", 1000, 1)],
+    "KNeighbors":         [("n_neighbors", 5, -1)],  # fewer neighbors = more capacity
+    "SGD":                [("max_iter", 1000, 1)],
+}
+
 
 def _get_reg_mutation(model_name: str, current_hp: dict, direction: str) -> dict:
     """Return updated hyperparams with regularization adjusted."""
@@ -49,6 +63,30 @@ def _get_reg_mutation(model_name: str, current_hp: dict, direction: str) -> dict
     return current_hp
 
 
+def _apply_capacity(model_name: str, hp: dict, scale: float, increase: bool) -> dict:
+    """Scale capacity-related hyperparameters for the given model family."""
+    hp = dict(hp)
+    for prefix, params in _CAPACITY_PARAMS.items():
+        if model_name.startswith(prefix):
+            for param, default, direction in params:
+                if direction == 0:
+                    continue  # categorical param, skip
+                current = hp.get(param, default)
+                if not isinstance(current, (int, float)):
+                    continue
+                if direction == 1:
+                    new_val = current * scale if increase else current * (1.0 / scale)
+                else:
+                    new_val = current * (1.0 / scale) if increase else current * scale
+                hp[param] = max(1, int(round(new_val))) if isinstance(default, int) else round(new_val, 6)
+            return hp
+    # Fallback: just scale n_estimators if present
+    if "n_estimators" in hp:
+        n = hp["n_estimators"]
+        hp["n_estimators"] = max(10, int(n * scale if increase else n * (1.0 / scale)))
+    return hp
+
+
 def build_experiment_config(action: ActionDecision) -> ExperimentConfig:
     params      = dict(action.parameters)
     action_type = action.action_type
@@ -66,13 +104,11 @@ def build_experiment_config(action: ActionDecision) -> ExperimentConfig:
 
     elif action_type == "increase_model_capacity":
         scale = float(hyperparameters.pop("scale", 1.5))
-        n = hyperparameters.get("n_estimators", 100)
-        hyperparameters["n_estimators"] = int(n * scale)
+        hyperparameters = _apply_capacity(model_name, hyperparameters, scale, increase=True)
 
     elif action_type == "decrease_model_capacity":
         scale = float(hyperparameters.pop("scale", 0.75))
-        n = hyperparameters.get("n_estimators", 100)
-        hyperparameters["n_estimators"] = max(10, int(n * scale))
+        hyperparameters = _apply_capacity(model_name, hyperparameters, scale, increase=False)
 
     elif action_type == "change_optimizer":
         lr_scale = float(hyperparameters.pop("learning_rate_scale", 0.1))

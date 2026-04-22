@@ -202,8 +202,20 @@ def _build_pdf(
     # Final metrics from artifact
     metrics_file = output_dir / "artifacts" / "metrics.json"
     if metrics_file.exists():
-        story.append(Paragraph("Final Metrics", h2))
+        story.append(Paragraph("Final Validation Metrics", h2))
         for k, v in json.loads(metrics_file.read_text()).items():
+            if v is not None:
+                story.append(Paragraph(f"<font name='Courier'>{k}: {v}</font>", mon))
+
+    # Test metrics
+    test_metrics_file = output_dir / "artifacts" / "test_metrics.json"
+    if test_metrics_file.exists():
+        story.append(Paragraph("Test Set Metrics", h2))
+        story.append(Paragraph(
+            "Evaluated on the held-out test split — these metrics were not seen during training.",
+            bod,
+        ))
+        for k, v in json.loads(test_metrics_file.read_text()).items():
             if v is not None:
                 story.append(Paragraph(f"<font name='Courier'>{k}: {v}</font>", mon))
 

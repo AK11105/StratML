@@ -100,4 +100,5 @@ Or set `deep_learning.enabled: true` in `config.yaml` to make DL the default for
 | ML pipelines (scikit-learn) | ✅ |
 | DL pipelines (PyTorch MLP/CNN1D/RNN) | ✅ |
 | Decision agent / rule engine | ✅ |
-| MLflow / TensorBoard / LangSmith | 🔲 |
+| MLflow (via `enable_mlflow: true` in config) | ✅ |
+| TensorBoard / LangSmith | 🔲 |

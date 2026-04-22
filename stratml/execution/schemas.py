@@ -47,6 +47,9 @@ class DataProfile(BaseModel):
     class_distribution: dict[str, int] = Field(default_factory=dict)
     feature_summary: list[FeatureInfo]
     recommended_metrics: list[str]
+    imbalance_ratio: Optional[float] = None       # max_class / min_class count
+    feature_variance_mean: Optional[float] = None  # mean variance across numerical features
+    class_entropy: Optional[float] = None          # entropy of class distribution
 
 
 # PreprocessingConfig imported from stratml.core.schemas
@@ -118,6 +121,7 @@ class ExperimentConfig(BaseModel):
     preprocessing: PreprocessingConfig
     early_stopping: bool = False
     early_stopping_patience: int = 5
+    tune: bool = False  # when True, ml_pipeline runs RandomizedSearchCV
 
 
 @dataclass

@@ -51,13 +51,15 @@ class ExecutionOrchestrator:
         time_budget: float | None = None,
         run_id: str = "run",
         log: Optional[Callable[[str], None]] = None,
+        enable_mlflow: bool = False,
     ) -> None:
-        self.send_profile = send_profile
-        self.send_result  = send_result
-        self.split_config = split_config or SplitConfig(method="stratified")
-        self.time_budget  = time_budget
-        self.run_id       = run_id
-        self.log          = log or (lambda msg: None)
+        self.send_profile  = send_profile
+        self.send_result   = send_result
+        self.split_config  = split_config or SplitConfig(method="stratified")
+        self.time_budget   = time_budget
+        self.run_id        = run_id
+        self.log           = log or (lambda msg: None)
+        self.enable_mlflow = enable_mlflow
 
     def run(self, dataset_path: str, target_column: str) -> None:
         # ── Phase 1+2: Ingest and profile ────────────────────────────────────
@@ -143,6 +145,7 @@ class ExecutionOrchestrator:
                 config=config,
                 tensorboard_log_dir=tb_dir,
                 artifacts_root=Path("outputs") / self.run_id / "artifacts",
+                enable_mlflow=self.enable_mlflow,
             )
 
             # ── Phase 8: Assemble ExperimentResult ───────────────────────────
@@ -169,3 +172,32 @@ class ExecutionOrchestrator:
             self.log("  Evaluating signals & deciding next action...")
             action = self.send_result(result)
             self.log(f"  Decision : {action.action_type} | trigger={action.reason.trigger} | confidence={action.confidence:.2f} | next={action.parameters}")
+
+        # ── Test set evaluation (ML only) ─────────────────────────────────────
+        self.log("\n  --- Test Set Evaluation ---")
+        best_model_path = Path("outputs") / self.run_id / "artifacts" / "model.pkl"
+        if best_model_path.exists() and config.model_type == "ml":
+            try:
+                import joblib
+                best_model = joblib.load(best_model_path)
+                # Apply same preprocessing as last iteration to test split
+                test_split, _ = apply_preprocessing(base_split, config.preprocessing, profile)
+                y_test_pred = best_model.predict(test_split.X_test)
+                test_metrics = compute_metrics(
+                    y_true=test_split.y_test,
+                    y_pred=y_test_pred,
+                    train_curve=[],
+                    val_curve=[],
+                    problem_type=profile.problem_type,
+                )
+                primary_test = test_metrics.accuracy if test_metrics.accuracy is not None else (test_metrics.r2 or 0.0)
+                self.log(f"  Test metrics: primary={primary_test:.4f}")
+                # Persist test metrics alongside the model artifacts
+                import json
+                test_metrics_path = Path("outputs") / self.run_id / "artifacts" / "test_metrics.json"
+                test_metrics_path.write_text(json.dumps(test_metrics.model_dump(), indent=2))
+                self.log(f"  Test metrics saved to {test_metrics_path}")
+            except Exception as exc:
+                self.log(f"  Test set evaluation failed: {exc}")
+        else:
+            self.log("  Skipped (no saved model or DL model — test eval not implemented for DL here)")
