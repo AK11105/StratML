@@ -87,17 +87,23 @@ class ExecutionOrchestrator:
         iteration     = 0
         total_runtime = 0.0
         current_model = action.parameters.get("model_name", "LogisticRegression")
+        current_hyperparameters: dict = {}
 
         while action.action_type != "terminate":
             iteration += 1
             self.log(f"\n  --- Iteration {iteration} ---")
             if "model_name" not in action.parameters:
                 action.parameters["model_name"] = current_model
+            # Carry forward previous hyperparameters for capacity/regularization actions
+            if action.action_type in ("increase_model_capacity", "decrease_model_capacity", "modify_regularization", "change_optimizer"):
+                for k, v in current_hyperparameters.items():
+                    action.parameters.setdefault(k, v)
             current_model = action.parameters.get("model_name", current_model)
             self.log(f"  Training : {current_model} ({action.action_type}) ...")
 
             # ── Phase 4: Translate ActionDecision → ExperimentConfig ─────────
             config = build_experiment_config(action)
+            current_hyperparameters = dict(config.hyperparameters)
 
             # ── Phase 4b: Apply preprocessing ────────────────────────────────
             clean_split, applied_preprocessing = apply_preprocessing(

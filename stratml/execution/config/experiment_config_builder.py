@@ -83,7 +83,11 @@ def build_experiment_config(action: ActionDecision) -> ExperimentConfig:
         pass
 
     elif action_type != "terminate":
-        raise ValueError(f"Cannot build config for action_type='{action_type}'")
+        import logging
+        logging.getLogger(__name__).warning(
+            "Unknown action_type='%s' — treating as apply_preprocessing (model unchanged).",
+            action_type,
+        )
 
     model_type     = "dl" if model_name in _DL_MODELS else "ml"
     early_stopping = action_type == "early_stop"
