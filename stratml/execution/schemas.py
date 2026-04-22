@@ -90,6 +90,8 @@ class ExperimentResult(BaseModel):
     runtime: float
     resource_usage: ResourceUsage
     artifacts: ArtifactRefs
+    early_stopped: Optional[bool] = None   # True if DL early stopping triggered
+    best_epoch: Optional[int] = None       # epoch with lowest val loss (DL only)
 
 
 class ActionDecision(BaseModel):
