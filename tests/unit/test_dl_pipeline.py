@@ -225,6 +225,14 @@ class TestEarlyStopping:
         # model_state must be loadable back into the model without error
         r.model.load_state_dict(r.model_state)
 
+    def test_best_epoch_leq_epochs_run(self, clf_split):
+        r = run_dl_pipeline(_config(epochs=10), clf_split)
+        assert 0 <= r.best_epoch < r.epochs_run
+
+    def test_best_epoch_is_int(self, clf_split):
+        r = run_dl_pipeline(_config(), clf_split)
+        assert isinstance(r.best_epoch, int)
+
 
 # ── TensorBoard ───────────────────────────────────────────────────────────────
 

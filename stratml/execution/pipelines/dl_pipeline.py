@@ -63,6 +63,7 @@ class DLPipelineResult:
     device_used: str = "cpu"
     epochs_run: int = 0
     early_stopped: bool = False
+    best_epoch: int = 0
     model_state: dict = field(default_factory=dict)
 
 
@@ -154,6 +155,7 @@ def run_dl_pipeline(
     val_curve:   list[float] = []
     best_val_loss    = float("inf")
     best_state_dict  = None
+    best_epoch_idx   = 0
     patience_counter = 0
     early_stopped    = False
     patience = config.early_stopping_patience if config.early_stopping else max(5, epochs // 4)
@@ -209,6 +211,7 @@ def run_dl_pipeline(
         if val_loss < best_val_loss - 1e-4:
             best_val_loss    = val_loss
             best_state_dict  = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_epoch_idx   = epoch
             patience_counter = 0
         else:
             patience_counter += 1
@@ -245,5 +248,6 @@ def run_dl_pipeline(
         device_used=str(device),
         epochs_run=len(train_curve),
         early_stopped=early_stopped,
+        best_epoch=best_epoch_idx,
         model_state={k: v.cpu() for k, v in model.state_dict().items()},
     )

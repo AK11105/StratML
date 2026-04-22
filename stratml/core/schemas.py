@@ -36,7 +36,7 @@ class PreprocessingConfig(BaseModel):
     """Preprocessing decisions — embedded in both ActionDecision and ExperimentResult."""
 
     missing_value_strategy: str = Field(..., pattern="^(mean|median|mode|drop)$")
-    scaling: str = Field(..., pattern="^(standard|minmax|none)$")
+    scaling: str = Field(..., pattern="^(standard|minmax|robust|none)$")
     encoding: str = Field(..., pattern="^(onehot|label|none)$")
     imbalance_strategy: str = Field(..., pattern="^(oversample|undersample|none)$")
     feature_selection: str = Field(..., pattern="^(variance_threshold|none)$")
@@ -100,6 +100,10 @@ class ExperimentResult(BaseModel):
     runtime: float
     resource_usage: ResourceUsage
     artifacts: ArtifactRefs
+
+    # --- training metadata (DL-populated, None for ML) ---
+    early_stopped: Optional[bool] = None   # True if early stopping triggered
+    best_epoch: Optional[int] = None       # epoch index with lowest val loss
 
 
 # ---------------------------------------------------------------------------

@@ -192,8 +192,8 @@ def build_state(
             hyperparameters=result.hyperparameters,
             complexity_hint=_infer_complexity(result.hyperparameters),
             runtime=result.runtime,
-            convergence_epoch=len(result.train_curve),
-            early_stopped=None,
+            convergence_epoch=result.best_epoch if result.best_epoch is not None else len(result.train_curve),
+            early_stopped=result.early_stopped,
         ),
         generalization=StateGeneralization(train_loss=train_loss, validation_loss=val_loss, gap=gap),
         resources=StateResources(
