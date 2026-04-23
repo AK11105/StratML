@@ -154,4 +154,5 @@ class TestMultiIteration:
         metrics     = compute_metrics(clean.y_val, pipe.y_val_pred, pipe.train_curve, pipe.val_curve, "classification")
 
         assert metrics.accuracy is not None
-        assert config.hyperparameters.get("n_estimators") == 50
+        # n_estimators=50 scaled by default scale=1.5 → 75
+        assert config.hyperparameters.get("n_estimators") == 75

@@ -17,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, LabelEncoder, OneHotEncoder
 from sklearn.feature_selection import VarianceThreshold
 
 from stratml.execution.schemas import DataSplit, DataProfile, PreprocessingConfig
@@ -80,14 +80,22 @@ def apply_preprocessing(
         elif config.encoding == "label":
             for col in cat_cols:
                 le = LabelEncoder()
-                X_train[col] = le.fit_transform(X_train[col].astype(str))
-                X_val[col]   = X_val[col].astype(str).map(lambda v, le=le: le.transform([v])[0] if v in le.classes_ else -1)
-                X_test[col]  = X_test[col].astype(str).map(lambda v, le=le: le.transform([v])[0] if v in le.classes_ else -1)
+                le.fit(X_train[col].astype(str))
+                known = set(le.classes_)
+                X_train[col] = le.transform(X_train[col].astype(str))
+                X_val[col]   = X_val[col].astype(str).map(lambda v: le.transform([v])[0] if v in known else -1)
+                X_test[col]  = X_test[col].astype(str).map(lambda v: le.transform([v])[0] if v in known else -1)
 
     # ── 3. Numerical scaling ─────────────────────────────────────────────────
+    # Recompute after encoding — onehot may have dropped original cat cols
     active_num_cols = [c for c in num_cols if c in X_train.columns]
     if active_num_cols and config.scaling != "none":
-        scaler = StandardScaler() if config.scaling == "standard" else MinMaxScaler()
+        if config.scaling == "standard":
+            scaler = StandardScaler()
+        elif config.scaling == "robust":
+            scaler = RobustScaler()
+        else:
+            scaler = MinMaxScaler()
         X_train[active_num_cols] = scaler.fit_transform(X_train[active_num_cols])
         X_val[active_num_cols]   = scaler.transform(X_val[active_num_cols])
         X_test[active_num_cols]  = scaler.transform(X_test[active_num_cols])
@@ -105,7 +113,13 @@ def apply_preprocessing(
             X_train = pd.DataFrame(X_train_arr, columns=X_train.columns)
             y_train = pd.Series(y_train_arr, name=y_train.name)
         except ImportError:
-            pass  # imbalanced-learn not installed — skip silently
+            import warnings
+            warnings.warn(
+                "imbalanced-learn is not installed — imbalance correction skipped. "
+                "Install with: pip install imbalanced-learn",
+                UserWarning,
+                stacklevel=2,
+            )
 
     # ── 5. Feature selection ─────────────────────────────────────────────────
     if config.feature_selection == "variance_threshold":

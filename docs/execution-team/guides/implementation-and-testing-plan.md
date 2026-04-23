@@ -5,82 +5,44 @@
 | Phase | File | Status |
 |---|---|---|
 | 1 | `execution/data/loader.py` | ✅ Done |
-| 1 | `execution/data/validator.py` | ✅ Done |
-| 2 | `execution/data/profiler.py` | ✅ Done |
-| 2 | `execution/schemas.py` | ✅ Done (extended with SplitConfig, ExperimentConfig, DataSplit) |
+| 1 | `execution/data/validator.py` | ✅ Done — hardened (zero-row, duplicate cols, all-null, target validity) |
+| 2 | `execution/data/profiler.py` | ✅ Done — extended with `imbalance_ratio`, `feature_variance_mean`, `class_entropy`; improved problem type inference |
+| 2 | `execution/schemas.py` | ✅ Done — extended with `DataProfile` new fields, `ExperimentConfig.tune` flag |
 | 3 | `execution/preprocessing/splitter.py` | ✅ Done |
-| 4 | `execution/config/experiment_config_builder.py` | ✅ Done |
-| 4b | `execution/preprocessing/preprocessor.py` | ✅ Done |
-| 5a | `execution/pipelines/ml_pipeline.py` | ✅ Done |
+| 4 | `execution/config/experiment_config_builder.py` | ✅ Done — `_CAPACITY_PARAMS` dict covers all major model families |
+| 4b | `execution/preprocessing/preprocessor.py` | ✅ Done — RobustScaler added, label encoding closure fixed, imbalanced-learn warning added |
+| 5a | `execution/pipelines/ml_pipeline.py` | ✅ Done — `_PARAM_GRIDS` + `RandomizedSearchCV` when `tune=True` |
 | 5b | `execution/pipelines/dl_pipeline.py` | ✅ Done |
 | 6 | `execution/metrics/metrics_engine.py` | ✅ Done |
-| 7 | `execution/artifacts/artifact_manager.py` | ✅ Done |
+| 7 | `execution/artifacts/artifact_manager.py` | ✅ Done — MLflow wired via `enable_mlflow` flag |
 | 8 | `execution/result_builder.py` | ✅ Done |
-| 9 | `orchestration/orchestrator.py` | ✅ Done |
+| 9 | `orchestration/orchestrator.py` | ✅ Done — test set evaluation + `enable_mlflow` threading |
 
 ---
 
 ## What Remains to Implement
 
-### 1. Observability (not yet wired)
+### 1. Wire `tune=True` through CLI
 
-These files exist as empty `__init__.py` stubs. Need to be implemented before production use.
+`ExperimentConfig.tune` and `_PARAM_GRIDS` + `RandomizedSearchCV` are fully implemented in `ml_pipeline.py`, but the flag is never set to `True` by the config builder or CLI. Add a `--tune` flag to `stratml run` and thread it through `build_experiment_config`.
 
-**`stratml/observability/mlflow_logger.py`**
-- Log hyperparameters, metrics, run metadata to MLflow
-- Called inside `ml_pipeline.py` and `dl_pipeline.py` after training
-- Requires `enable_mlflow: true` in config
+### 2. DL test set evaluation
 
-**`stratml/observability/tensorboard.py`**
-- Log per-epoch loss curves to TensorBoard event files
-- Called inside `dl_pipeline.py` during the training loop
-- Writes to `outputs/runs/{experiment_id}/`
+The orchestrator skips test set evaluation for DL models. Needs:
+- Save DL model state dict to `.pth` in `artifact_manager.py`
+- After the loop, rebuild the architecture from config, load state dict, run `predict` on `X_test`
 
-**`stratml/observability/langsmith.py`**
-- Log decision traces (Team B's responsibility, but Team A needs to pass experiment_id)
+### 3. TensorBoard wiring
 
-### 2. CLI `run` command — connect to orchestrator
+`dl_pipeline.py` sets a log dir but never writes events. Add `torch.utils.tensorboard.SummaryWriter` calls inside the epoch loop.
 
-`stratml/cli/main.py` → `run_pipeline()` currently prints a placeholder:
-```
-[Placeholder] Orchestrator not yet connected.
-```
+### 4. Training curve charts in PDF report
 
-Needs to:
-1. Instantiate `ExecutionOrchestrator`
-2. Wire Team B's interface (once Team B's `agent.py` / `bootstrap.py` is ready)
-3. Call `orchestrator.run(dataset_path, target_column)`
+`report_generator.py` shows an iteration table but no visual plots. Add matplotlib training/validation curve plots embedded as images in the PDF.
 
-### 3. Team B integration
+### 5. Observability stubs
 
-The orchestrator expects two callables:
-```python
-send_profile: DataProfile → ActionDecision
-send_result:  ExperimentResult → ActionDecision
-```
-
-Once Team B implements `stratml/decision/bootstrap.py` (iteration 0) and `stratml/decision/agent.py` (iteration 1+), these get wired into the orchestrator.
-
-### 4. Extend ML model registry
-
-Current registry has 7 models. Add before integration testing:
-- `DecisionTreeClassifier` / `DecisionTreeRegressor`
-- `KNeighborsClassifier` / `KNeighborsRegressor`
-- `LinearRegression` / `Ridge` / `Lasso`
-- `XGBClassifier` / `XGBRegressor` (if xgboost is added to dependencies)
-
-### 5. DL pipeline — regression support
-
-Current `dl_pipeline.py` only handles classification (CrossEntropyLoss + label encoding).
-Needs a regression branch: MSELoss, no label encoding, single output neuron.
-
-### 6. `SplitConfig` schema discrepancy
-
-`execution/schemas.py` has `SplitConfig` but it is not yet exported from `execution/__init__.py`.
-Add to `stratml/execution/__init__.py`:
-```python
-from stratml.execution.schemas import SplitConfig, ExperimentConfig, DataSplit
-```
+`stratml/observability/` files (`mlflow_logger.py`, `tensorboard.py`, `langsmith.py`) are empty. MLflow is currently wired directly in `artifact_manager.py`. These stubs can be formalised once the observability layer is prioritised.
 
 ---
 

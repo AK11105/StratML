@@ -233,6 +233,12 @@ Loop terminates when:
 - Budget is exhausted (enforced by Team A's orchestrator)
 - Performance goal is met
 
+After the loop, Team A runs **test set evaluation** (ML models only):
+- Loads best `model.pkl` from `outputs/<run_id>/artifacts/`
+- Applies last-iteration preprocessing to `X_test`
+- Computes metrics and saves `test_metrics.json`
+- PDF report includes a "Test Set Metrics" section
+
 ---
 
 # Architecture Diagram

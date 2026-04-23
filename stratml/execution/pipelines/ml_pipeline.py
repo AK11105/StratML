@@ -29,6 +29,24 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from stratml.execution.schemas import ExperimentConfig, DataSplit
 
+_PARAM_GRIDS: dict[str, dict] = {
+    "RandomForestClassifier":     {"n_estimators": [50, 100, 200], "max_depth": [None, 5, 10], "max_features": ["sqrt", "log2"]},
+    "RandomForestRegressor":      {"n_estimators": [50, 100, 200], "max_depth": [None, 5, 10], "max_features": ["sqrt", "log2"]},
+    "ExtraTreesClassifier":       {"n_estimators": [50, 100, 200], "max_depth": [None, 5, 10]},
+    "ExtraTreesRegressor":        {"n_estimators": [50, 100, 200], "max_depth": [None, 5, 10]},
+    "GradientBoostingClassifier": {"learning_rate": [0.01, 0.1, 0.3], "n_estimators": [50, 100, 200], "max_depth": [3, 5, 7]},
+    "GradientBoostingRegressor":  {"learning_rate": [0.01, 0.1, 0.3], "n_estimators": [50, 100, 200], "max_depth": [3, 5, 7]},
+    "LogisticRegression":         {"C": [0.01, 0.1, 1, 10], "solver": ["lbfgs", "saga"]},
+    "SVC":                        {"C": [0.1, 1, 10], "kernel": ["rbf", "linear"], "gamma": ["scale", "auto"]},
+    "SVR":                        {"C": [0.1, 1, 10], "kernel": ["rbf", "linear"], "gamma": ["scale", "auto"]},
+    "Ridge":                      {"alpha": [0.01, 0.1, 1.0, 10.0]},
+    "Lasso":                      {"alpha": [0.01, 0.1, 1.0, 10.0]},
+    "KNeighborsClassifier":       {"n_neighbors": [3, 5, 7, 11]},
+    "KNeighborsRegressor":        {"n_neighbors": [3, 5, 7, 11]},
+    "DecisionTreeClassifier":     {"max_depth": [None, 5, 10, 20], "min_samples_split": [2, 5, 10]},
+    "DecisionTreeRegressor":      {"max_depth": [None, 5, 10, 20], "min_samples_split": [2, 5, 10]},
+}
+
 MODEL_REGISTRY: dict = {
     # ── Linear ────────────────────────────────────────────────────────────────
     "LinearRegression":         LinearRegression,
@@ -72,7 +90,7 @@ class MLPipelineResult:
 
 
 def run_ml_pipeline(config: ExperimentConfig, data_split: DataSplit) -> MLPipelineResult:
-    """Instantiate, train, and evaluate a sklearn model."""
+    """Instantiate, train (optionally tune), and evaluate a sklearn model."""
     cls = MODEL_REGISTRY.get(config.model_name)
     if cls is None:
         raise ValueError(f"Unknown model '{config.model_name}'. Available: {list(MODEL_REGISTRY)}")
@@ -80,12 +98,27 @@ def run_ml_pipeline(config: ExperimentConfig, data_split: DataSplit) -> MLPipeli
     valid_params = inspect.signature(cls.__init__).parameters
     hp = {k: v for k, v in config.hyperparameters.items() if k in valid_params}
 
-    model = cls(**hp)
-
     t0 = time.perf_counter()
-    model.fit(data_split.X_train, data_split.y_train)
-    runtime = round(time.perf_counter() - t0, 4)
 
+    if config.tune and config.model_name in _PARAM_GRIDS:
+        from sklearn.model_selection import RandomizedSearchCV
+        base = cls(**hp)
+        search = RandomizedSearchCV(
+            base,
+            _PARAM_GRIDS[config.model_name],
+            n_iter=10,
+            cv=3,
+            random_state=42,
+            n_jobs=-1,
+            error_score="raise",
+        )
+        search.fit(data_split.X_train, data_split.y_train)
+        model = search.best_estimator_
+    else:
+        model = cls(**hp)
+        model.fit(data_split.X_train, data_split.y_train)
+
+    runtime = round(time.perf_counter() - t0, 4)
     y_val_pred = model.predict(data_split.X_val)
 
     try:

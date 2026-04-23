@@ -79,6 +79,7 @@ def run_pipeline(args) -> None:
         time_budget=e.get("timeout_per_run"),
         run_id=run_id,
         log=print,
+        tune=config.get("execution", {}).get("tune", False),
     ).run(d["path"], d["target_column"])
 
     print(f"\n  Run complete.\n  {sep}")

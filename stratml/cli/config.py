@@ -66,6 +66,8 @@ def apply_cli_overrides(config: dict, args) -> dict:
         dl["learning_rate"] = args.lr
     if getattr(args, "batch_size", None) is not None:
         dl["batch_size"] = args.batch_size
+    if getattr(args, "tune", False):
+        config["execution"]["tune"] = True
     return config
 
 
