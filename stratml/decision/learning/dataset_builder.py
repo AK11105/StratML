@@ -1,23 +1,27 @@
 """
 dataset_builder.py
 ------------------
-Decision/Learning — Decision Dataset Builder.  [STUB]
+Decision/Learning — Decision Dataset Builder.
 
-Appends one row per decision cycle to decision_dataset.csv.
-Columns: state features + action_type + observed_gain (filled retroactively).
+Appends one row per decision cycle to:
+  - outputs/<run_id>/decision_logs/decision_dataset.csv  (run-specific, set by DecisionEngine)
+  - runs/decision_logs/decision_dataset.csv              (unified, always written)
 
-Full implementation: populate observed_gain after next ExperimentResult arrives.
+observed_gain is backfilled by backfill_last_gain() when the next ExperimentResult arrives.
 """
 
 from __future__ import annotations
 
 import csv
-import os
 from pathlib import Path
 
 from stratml.core.schemas import CandidateAction, StateObject
 
+# Run-specific path — overridden by DecisionEngine.__init__
 _DATASET_PATH = Path("runs/decision_logs/decision_dataset.csv")
+
+# Unified path — accumulates across all runs for value model training
+_UNIFIED_PATH = Path("runs/decision_logs/decision_dataset.csv")
 
 _COLUMNS = [
     "experiment_id", "iteration",
@@ -26,16 +30,23 @@ _COLUMNS = [
     "underfitting", "overfitting", "well_fitted", "converged", "stagnating",
     "num_samples", "num_features", "missing_ratio",
     "runtime", "remaining_budget",
-    "action_type", "action_params",
-    "observed_gain",  # filled retroactively
+    "action_type", "action_params", "predicted_gain",
+    "observed_gain",       # backfilled by backfill_last_gain()
+    "normalized_gain",     # observed_gain / (1 - best_score_at_decision), cross-dataset comparable
 ]
 
 
-def record(state: StateObject, action: CandidateAction) -> None:
-    """Append a row for the chosen action. observed_gain left blank until next result."""
-    _DATASET_PATH.parent.mkdir(parents=True, exist_ok=True)
-    write_header = not _DATASET_PATH.exists()
+def _append(path: Path, row: dict, write_header: bool) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_COLUMNS)
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
 
+
+def record(state: StateObject, action: CandidateAction, predicted_gain: float = 0.0) -> None:
+    """Append a row for the selected action. observed_gain left blank until backfilled."""
     row = {
         "experiment_id": state.meta.experiment_id,
         "iteration": state.meta.iteration,
@@ -58,11 +69,40 @@ def record(state: StateObject, action: CandidateAction) -> None:
         "remaining_budget": state.resources.remaining_budget,
         "action_type": action.action_type,
         "action_params": str(action.parameters),
+        "predicted_gain": predicted_gain,
         "observed_gain": "",
+        "normalized_gain": "",
     }
 
-    with open(_DATASET_PATH, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=_COLUMNS)
-        if write_header:
-            writer.writeheader()
-        writer.writerow(row)
+    _append(_DATASET_PATH, row, not _DATASET_PATH.exists())
+
+    # Also write to unified path (skip if same as run-specific)
+    if _UNIFIED_PATH != _DATASET_PATH:
+        _append(_UNIFIED_PATH, row, not _UNIFIED_PATH.exists())
+
+
+def backfill_last_gain(gain: float) -> None:
+    """Update observed_gain and normalized_gain of the last unfilled row in both CSVs."""
+    for path in {_DATASET_PATH, _UNIFIED_PATH}:
+        if not path.exists():
+            continue
+        try:
+            import csv as _csv
+            rows = list(_csv.DictReader(path.open(encoding="utf-8")))
+            if not rows:
+                continue
+            # Find last row with empty observed_gain
+            for row in reversed(rows):
+                if row.get("observed_gain", "").strip() == "":
+                    row["observed_gain"] = str(round(gain, 6))
+                    best = float(row.get("best_score") or 0.0)
+                    headroom = 1.0 - best
+                    row["normalized_gain"] = str(round(gain / headroom, 6)) if headroom > 1e-6 else str(round(gain, 6))
+                    break
+            with path.open("w", newline="", encoding="utf-8") as f:
+                writer = _csv.DictWriter(f, fieldnames=_COLUMNS)
+                writer.writeheader()
+                writer.writerows(rows)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("backfill_last_gain failed for %s: %s", path, exc)

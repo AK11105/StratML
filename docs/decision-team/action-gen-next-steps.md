@@ -1,270 +1,149 @@
-# Decision Engine — Next Steps: Rule-Based → LLM-Backed Multi-Agent
+# Decision Engine — Remaining Work
 
-## Context
+## Current State
 
-The vertical flow is complete and all 46 tests pass. The pipeline shape is correct:
+The full vertical pipeline is implemented and wired. LLM-backed agents (performance,
+efficiency, stability, coordinator) and LLM-backed action generation are all done with
+rule-based fallbacks. All dataset bugs are fixed. Unified decision dataset accumulates
+across runs at `runs/decision_logs/decision_dataset.csv`.
 
-```
-StateObject → action_generator → value_model → calibration → uncertainty
-           → [performance_agent, efficiency_agent, stability_agent]
-           → coordinator_agent → action_selector → ActionDecision
-```
-
-The problem: every component in this pipeline is deterministic. The "agents" are lookup
-tables. The coordinator is a weighted sum. The value model returns constants. The
-`reason.source` is hardcoded to `"rule"`. This is not a multi-agent system — it is a
-scoring function with a multi-agent-shaped API.
-
-The goal of this phase is to replace the rule-based internals with LLM-backed reasoning
-while keeping every interface contract unchanged.
-
----
-
-## What "Multi-Agent" Actually Means Here
-
-Each agent must have its own LLM call with its own system prompt, its own perspective,
-and its own structured output. The agents must be able to disagree. The coordinator must
-resolve disagreement through reasoning, not arithmetic.
-
-This is the only defensible definition of multi-agent in this context.
-
----
-
-## LLM Provider
-
-API-based (not local) due to latency constraints. LangChain's abstraction layer will be
-used so the provider can be swapped. Target: OpenAI (`gpt-4o-mini` for speed/cost,
-`gpt-4o` for quality). API key via environment variable `OPENAI_API_KEY`.
-
-All LLM calls use structured output (Pydantic models via `.with_structured_output()`).
-No free-text parsing.
-
----
-
-## Phase 1 — LLM Backbone for Each Specialist Agent
-
-**Files touched:** `agents/performance_agent.py`, `agents/efficiency_agent.py`,
-`agents/stability_agent.py`
-
-**What changes:** Each agent currently returns a hardcoded score from a lookup dict.
-Replace each with a LangChain chain that:
-
-1. Receives a structured prompt containing the relevant slice of `StateObject` and the
-   candidate action list
-2. Reasons from its specialist perspective
-3. Returns a structured score dict (`dict[str, float]`) via `.with_structured_output()`
-
-Each agent has a distinct system prompt that defines its perspective:
-
-**Performance agent system prompt framing:**
-> You are a performance analyst. Your only concern is whether a candidate action will
-> improve the model's predictive accuracy given the current fitting state and trajectory.
-> Score each action 0.0–1.0 on expected performance gain.
-
-**Efficiency agent system prompt framing:**
-> You are a resource analyst. Your only concern is compute cost and budget consumption.
-> Score each action 0.0–1.0 on efficiency (higher = cheaper relative to remaining budget).
-
-**Stability agent system prompt framing:**
-> You are a training stability analyst. Your only concern is whether a candidate action
-> risks destabilizing training given current variance, divergence, and loss signals.
-> Score each action 0.0–1.0 on stability (higher = safer).
-
-The function signatures stay identical — `score(state, estimates) -> dict[str, float]`.
-The coordinator receives the same inputs as before. Nothing downstream changes.
-
-**Fallback:** If the LLM call fails or returns malformed output, fall back to the
-existing lookup-table logic. This makes the agents resilient without removing the
-rule-based baseline.
-
----
-
-## Phase 2 — LLM Coordinator with Explicit Deliberation
-
-**File touched:** `agents/coordinator_agent.py`
-
-**What changes:** The coordinator currently computes:
-```
-final_score = 0.5 * perf + 0.25 * eff + 0.25 * stab
+Check progress toward value model activation:
+```bash
+python -c "
+import pandas as pd
+df = pd.read_csv('runs/decision_logs/decision_dataset.csv')
+filled = df[df['observed_gain'].notna() & (df['observed_gain'] != '')].shape[0]
+print(f'{filled}/50 rows filled — value model active: {filled >= 50}')
+"
 ```
 
-This is not deliberation. Replace with a LangChain chain that:
+---
 
-1. Receives all three agent scores, the full candidate list, and a summary of the
-   `StateObject` (trajectory, signals, resources, constraints)
-2. Is explicitly told that the three agents have already scored the candidates from their
-   own perspectives and may disagree
-3. Reasons about which action to select given the current experiment context — it can
-   override agent scores if the situation warrants it (e.g., budget is nearly exhausted
-   so efficiency should dominate even if performance agent disagrees)
-4. Returns a ranked list with a natural-language rationale per action
+## Phase 4 — Activate Learning Stubs (data-gated)
 
-The rationale string gets stored in `DecisionReason.evidence["rationale"]`. This is the
-trace that LangSmith will capture.
+**Threshold:** 50 rows with `observed_gain` filled in `runs/decision_logs/decision_dataset.csv`.
 
-The `reason.source` field changes from `"rule"` to `"learned"` when the LLM path is
-taken.
+Stubs activate automatically — no code changes needed. Verify activation:
 
-**Why this is Phase 2 and not Phase 1:** The coordinator's reasoning is only meaningful
-if the agent scores it receives are themselves meaningful. If the agents are still
-returning lookup-table values, the coordinator is reasoning over noise. Phase 1 must
-come first.
+- `value_model.py` logs no "using stub" warning after 50 rows
+- `calibration.py` fits on real `(predicted_gain, actual_gain)` pairs
+- `uncertainty.py` ensemble variance is non-zero
+
+One remaining fix needed in `uncertainty.py`: the ensemble re-encodes using only
+`predicted_gain` as a proxy feature because `StateObject` is not available at that
+stage. Fix by passing `state` through to `estimate()` and using `_encode_state_action()`
+from `value_model.py` for proper feature encoding.
 
 ---
 
-## Phase 3 — LLM-Backed Candidate Generation
+## Phase 5 — Preprocessing Adaptation
 
-**File touched:** `actions/action_generator.py`
+**File:** `stratml/decision/policy/action_selector.py`
 
-**What changes:** The generator currently uses an if-else tree on `state.signals`. It
-can only propose actions it was explicitly programmed for and cannot compose them.
-
-Replace with a LangChain chain that reads the full `StateObject` and proposes a
-`list[CandidateAction]` via structured output. The LLM can propose:
-
-- Actions the rules don't cover
-- Composed parameter choices (e.g., `modify_regularization` with a specific alpha value
-  derived from the current gap magnitude, not just `{"direction": "increase"}`)
-- Context-sensitive model suggestions (e.g., recommending `GradientBoosting` specifically
-  because the dataset has high imbalance ratio and the current model is `LogisticRegression`)
-
-The rule-based generator becomes the fallback. The interface is unchanged:
-`generate(state) -> list[CandidateAction]`.
-
-**Why this is Phase 3:** Expanding the candidate space before the coordinator can reason
-well (Phase 2) means bad candidates could get selected. The reasoning layer must be solid
-before the input space grows.
+`_DEFAULT_PREPROCESSING` is hardcoded. Replace with a function that reads `state.dataset`:
+- `imbalance_strategy` from `state.dataset.imbalance_ratio`
+- `missing_value_strategy` from `state.dataset.missing_ratio`
+- `scaling` from model type (tree models don't need it)
 
 ---
 
-## Phase 4 — Activate the Learning Stubs
+## Phase 6 — Action Coverage: Execution Team Dependency
 
-**Files touched:** `learning/value_model.py`, `learning/calibration.py`,
-`learning/uncertainty.py`
+The decision engine can only generate actions the execution team has implemented.
+Before adding any new action type to `_VALID_ACTION_TYPES` or the rule generator,
+confirm the execution team has a handler in `build_experiment_config` and the pipeline.
 
-**What changes:** These are currently stubs returning constants. Once enough rows exist
-in `decision_dataset.csv` (from real runs through Phases 1–3), activate them:
+### Current status
 
-- `value_model.py`: Train `RandomForestRegressor` on `(state_features, action_type) →
-  observed_gain`. The `observed_gain` column in the CSV is filled retroactively when the
-  next `ExperimentResult` arrives.
-- `calibration.py`: Fit `IsotonicRegression` on `(predicted_gain, actual_gain)` pairs.
-- `uncertainty.py`: Replace the stub ensemble with 4–5 actual model predictions; compute
-  variance across them as the confidence signal.
+| Action | ML | DL | Notes |
+|---|---|---|---|
+| `switch_model` | ✅ | ✅ | |
+| `modify_regularization` | ✅ | ✅ | |
+| `decrease_model_capacity` | ✅ | ✅ | |
+| `increase_model_capacity` | ✅ | ✅ | |
+| `change_optimizer` | ❌ ignored | ✅ | ML path silently ignores this |
+| `add_preprocessing` | ❌ | ❌ | Generated for imbalance; execution must implement |
+| `terminate` | ✅ | ✅ | |
 
-At this point the LLM agents in Phases 1–2 receive richer inputs — calibrated predicted
-gains with confidence intervals — so their reasoning is grounded in empirical data from
-actual runs, not just structural signals.
+### Full action space (execution team backlog)
 
-**Threshold to activate:** ~50 rows in `decision_dataset.csv` is enough to train a
-meaningful value model. Below that, keep the stubs.
+**Model selection**
+
+| Action | Parameters | ML | DL |
+|---|---|---|---|
+| `switch_model` | `model_name` | ✅ | ✅ |
+| `tune_hyperparameters` | `param_grid`, `method: grid/random/bayesian` | ❌ | ❌ |
+| `ensemble` | `strategy: voting/stacking`, `model_names: list` | ❌ | ❌ |
+
+**Capacity**
+
+| Action | Parameters | ML | DL |
+|---|---|---|---|
+| `increase_model_capacity` | `scale` | ✅ | ✅ |
+| `decrease_model_capacity` | `scale` | ✅ | ✅ |
+| `add_layers` | `num_layers`, `units` | N/A | ❌ |
+| `remove_layers` | `num_layers` | N/A | ❌ |
+| `change_architecture` | `architecture: mlp/cnn/rnn` | N/A | ❌ |
+
+**Regularization**
+
+| Action | Parameters | ML | DL |
+|---|---|---|---|
+| `modify_regularization` | `direction: increase/decrease` | ✅ | ✅ |
+| `add_dropout` | `rate` | N/A | ❌ |
+| `add_batch_norm` | — | N/A | ❌ |
+| `add_weight_decay` | `lambda` | N/A | ❌ |
+
+**Optimization (DL-specific)**
+
+| Action | Parameters | ML | DL |
+|---|---|---|---|
+| `change_optimizer` | `learning_rate_scale` | ❌ ignored | ✅ |
+| `change_lr_schedule` | `schedule: cosine/step/plateau` | N/A | ❌ |
+| `change_batch_size` | `batch_size` | N/A | ❌ |
+| `add_gradient_clipping` | `max_norm` | N/A | ❌ |
+
+**Preprocessing**
+
+| Action | Parameters | ML | DL |
+|---|---|---|---|
+| `add_preprocessing` | `strategy: oversample/undersample/smote` | ❌ | ❌ |
+| `add_feature_selection` | `method: variance/mutual_info/pca`, `n_features` | ❌ | ❌ |
+| `change_scaling` | `method: standard/minmax/robust/none` | ❌ | ❌ |
+| `add_augmentation` | `strategy` | N/A | ❌ |
+
+**Control**
+
+| Action | Parameters | ML | DL |
+|---|---|---|---|
+| `terminate` | — | ✅ | ✅ |
+
+Execution team priority order: `change_optimizer` (ML) → `add_preprocessing` →
+`add_feature_selection` → `tune_hyperparameters` → `ensemble` → DL-specific actions.
 
 ---
 
-## File Change Summary
+## Phase 7 — LangGraph: Intra-Decision Cycles
 
-| File | Current State | Target State |
-|---|---|---|
-| `agents/performance_agent.py` | Lookup dict | LangChain chain + fallback |
-| `agents/efficiency_agent.py` | Lookup dict | LangChain chain + fallback |
-| `agents/stability_agent.py` | Lookup dict | LangChain chain + fallback |
-| `agents/coordinator_agent.py` | Weighted sum | LangChain chain with deliberation |
-| `actions/action_generator.py` | If-else on signals | LangChain chain + rule fallback |
-| `learning/value_model.py` | Stub (0.05 constant) | Trained RandomForest |
-| `learning/calibration.py` | Pass-through | Fitted IsotonicRegression |
-| `learning/uncertainty.py` | Stub (0.5 constant) | Ensemble variance |
-| `policy/action_selector.py` | Picks rank[0] | Unchanged — coordinator handles ranking |
-| `core/schemas.py` | Frozen | Unchanged |
+Not started. Warranted when any of these arise from real runs:
 
----
+**Low-confidence deadlock** — coordinator confidence below threshold (`< 0.4`).
+With LangGraph: conditional edge `coordinator → re_query_agent → coordinator`.
 
-## Interface Contracts — Unchanged
+**Candidate rejection loop** — coordinator finds all candidates unsuitable.
+With LangGraph: `coordinator → action_generator → coordinator`.
 
-Nothing in `core/schemas.py` changes. `StateObject` in, `ActionDecision` out. The
-orchestrator integration (`engine.py`) is unaffected. Tests for the existing rule-based
-behavior remain valid as fallback coverage.
+**Pre-commit validation** — verify calibrated gain justifies predicted cost before
+committing. Conditional branch on efficiency agent re-evaluation.
+
+Trigger: start only after Phase 4 is active and producing meaningful calibrated gains.
 
 ---
 
-## LangSmith Tracing
+## Order of Work
 
-Every LLM call in Phases 1–3 is automatically traced by LangSmith if
-`LANGCHAIN_TRACING_V2=true` is set. The coordinator's rationale string in
-`DecisionReason.evidence["rationale"]` provides human-readable decision traces per
-iteration. This is the observability story for the decision layer.
-
----
-
-## Build Order
-
-1. Phase 1: `performance_agent` → `efficiency_agent` → `stability_agent`
-2. Phase 2: `coordinator_agent`
-3. Phase 3: `action_generator`
-4. Phase 4: activate stubs (data-gated, not time-gated)
-
-Do not start Phase 2 until Phase 1 agents are returning meaningful LLM scores.
-Do not start Phase 3 until Phase 2 coordinator is producing coherent rationales.
-Phase 4 is triggered by data volume, not by completing Phase 3.
-
----
-
-## Phase 5 — LangGraph: Intra-Decision Cycles
-
-Phases 1–4 produce a linear pipeline. Every decision cycle is a single forward pass —
-agents score, coordinator picks, done. LangGraph becomes the right tool when the
-coordinator needs to loop back within a single decision cycle.
-
-### Trigger condition
-
-Phase 5 is warranted when any of these situations arise naturally from real runs:
-
-**1. Low-confidence deadlock**
-The coordinator receives three agent scores that are genuinely conflicting and its
-confidence in the top-ranked action is below a threshold (e.g., `confidence < 0.4`).
-Rather than forcing a pick, the coordinator should be able to send a targeted follow-up
-question back to the disagreeing agent and re-score before committing.
-
-With LangChain this requires manual orchestration code. With LangGraph it is a
-conditional edge: `coordinator → re_query_agent → coordinator`.
-
-**2. Candidate rejection loop**
-The action generator proposes candidates, but the coordinator determines all of them are
-unsuitable given the current state (e.g., budget too low for any `switch_model`, but
-`terminate` is premature). It needs to send a constraint back to the generator and
-request a revised candidate set. This is a cycle: `coordinator → action_generator →
-coordinator`. LangGraph handles this natively; LangChain requires you to write the loop
-yourself.
-
-**3. Multi-step validation before commit**
-Post Phase 4, the value model has real predictions. Before the coordinator commits to an
-action, it may want to verify: "does the calibrated gain justify the predicted cost given
-remaining budget?" This is a conditional branch — if yes, commit; if no, ask the
-efficiency agent to re-evaluate with the calibrated gain as additional context. A
-LangGraph conditional edge handles this cleanly.
-
-### What changes architecturally
-
-The `engine.py` entry point stays identical — `receive_result(result) -> ActionDecision`.
-Internally, the linear chain:
-
-```
-action_generator → agents → coordinator → action_selector
-```
-
-becomes a LangGraph graph with the same nodes but with conditional edges between
-coordinator and the agents/generator. The `StateObject` becomes the LangGraph state
-dict (it already has the right shape for this — it's a Pydantic model with all relevant
-fields).
-
-`action_selector.py` and `decision_logger.py` remain pure Python — they sit outside the
-graph as post-processing steps on the graph's final output.
-
-### What does NOT change
-
-- `core/schemas.py` — frozen, untouched
-- `StateObject` contract — unchanged
-- `ActionDecision` output — unchanged
-- All existing tests — still valid
-
-LangGraph is a drop-in replacement for the internal orchestration of the decision cycle.
-Nothing outside `engine.py` and the agent files needs to know it happened.
+1. ✅ All dataset bugs fixed
+2. Phase 4 — verify stub activation after 50 rows; fix `uncertainty.py` state encoding
+3. Phase 5 — adaptive preprocessing in `action_selector.py`
+4. Phase 6 — coordinate with execution team on action handlers (see table above)
+5. Phase 7 — LangGraph cycles (data-gated)

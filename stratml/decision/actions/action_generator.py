@@ -23,8 +23,8 @@ from stratml.core.schemas import CandidateAction, StateObject
 log = logging.getLogger(__name__)
 
 _DEFAULT_MODELS = [
-    "LogisticRegression",
     "RandomForestClassifier",
+    "LogisticRegression",
     "GradientBoostingClassifier",
     "ExtraTreesClassifier",
     "SVC",
@@ -34,8 +34,8 @@ _DEFAULT_MODELS = [
 ]
 
 _BOOTSTRAP_MODELS = [
-    "LogisticRegression",
     "RandomForestClassifier",
+    "LogisticRegression",
     "GradientBoostingClassifier",
     "ExtraTreesClassifier",
     "KNeighborsClassifier",
@@ -50,6 +50,7 @@ _VALID_ACTION_TYPES = {
     "decrease_model_capacity",
     "modify_regularization",
     "change_optimizer",
+    "add_preprocessing",
     "terminate",
 }
 
@@ -90,9 +91,10 @@ _SYSTEM_PROMPT = (
     "propose a list of candidate next actions. You may suggest actions the rules don't "
     "cover, compose specific parameter values (e.g., a concrete alpha for regularization "
     "derived from the gap magnitude), or recommend a specific model based on dataset "
-    "characteristics. Always include 'terminate' as one candidate. "
+    "characteristics. Always include 'terminate' as one candidate — it is a valid choice "
+    "at any point if the situation warrants it. "
     "Valid action_types: switch_model, increase_model_capacity, decrease_model_capacity, "
-    "modify_regularization, change_optimizer, terminate."
+    "modify_regularization, change_optimizer, add_preprocessing, terminate."
 )
 
 
@@ -129,6 +131,7 @@ def _llm_candidates(state: StateObject) -> Optional[list[CandidateAction]]:
             f"budget_exhausted={state.resources.budget_exhausted}\n"
             f"Allowed models: {allowed}\n"
             f"Untried models: {untried}\n"
+            f"Models tried so far: {tried}\n"
             f"Train/val gap: {state.generalization.gap:.4f}\n\n"
             "Propose 2-4 candidate actions as a JSON list. Each must have action_type and parameters."
         )
@@ -136,7 +139,6 @@ def _llm_candidates(state: StateObject) -> Optional[list[CandidateAction]]:
         llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.2).with_structured_output(_CandidateList)
         output: _CandidateList = llm.invoke([SystemMessage(_SYSTEM_PROMPT), HumanMessage(human)])
 
-        # Validate and filter
         candidates = [
             CandidateAction(action_type=item.action_type, parameters=item.parameters)
             for item in output.candidates
@@ -146,7 +148,6 @@ def _llm_candidates(state: StateObject) -> Optional[list[CandidateAction]]:
         if not candidates:
             return None
 
-        # Ensure terminate is always present
         if not any(c.action_type == "terminate" for c in candidates):
             candidates.append(CandidateAction(action_type="terminate", parameters={}))
 
@@ -189,13 +190,13 @@ def _rule_candidates(state: StateObject) -> list[CandidateAction]:
         candidates.append(CandidateAction(action_type="increase_model_capacity", parameters={"scale": 1.5}))
 
     if sig.overfitting != "none":
-        if sig.plateau_detected == "strong" and untried:
+        # Always offer an untried model — regularization alone rarely fixes structural overfitting
+        if untried:
             candidates.append(CandidateAction(action_type="switch_model", parameters={"model_name": untried[0]}))
-        else:
-            candidates.append(CandidateAction(action_type="modify_regularization", parameters={"direction": "increase"}))
-            candidates.append(CandidateAction(action_type="decrease_model_capacity", parameters={"scale": 0.75}))
-            if state.trajectory.steps_since_improvement >= 2 and untried:
-                candidates.append(CandidateAction(action_type="switch_model", parameters={"model_name": untried[0]}))
+        candidates.append(CandidateAction(action_type="modify_regularization", parameters={"direction": "increase"}))
+        candidates.append(CandidateAction(action_type="decrease_model_capacity", parameters={"scale": 0.75}))
+        if state.dataset.imbalance_ratio and state.dataset.imbalance_ratio > 2.0:
+            candidates.append(CandidateAction(action_type="add_preprocessing", parameters={"strategy": "oversample"}))
 
     if sig.stagnating != "none" or sig.plateau_detected != "none":
         if untried:
@@ -207,12 +208,16 @@ def _rule_candidates(state: StateObject) -> list[CandidateAction]:
     if sig.diminishing_returns != "none":
         if untried:
             candidates.append(CandidateAction(action_type="switch_model", parameters={"model_name": untried[0]}))
-        else:
-            candidates.append(CandidateAction(action_type="terminate", parameters={}))
 
+    # No signal fired — pure exploration
+    if not candidates and untried:
+        candidates.append(CandidateAction(action_type="switch_model", parameters={"model_name": untried[0]}))
+
+    # terminate is always a valid candidate — coordinator decides whether to pick it
     if not any(c.action_type == "terminate" for c in candidates):
         candidates.append(CandidateAction(action_type="terminate", parameters={}))
 
+    # Deduplicate
     seen: set[tuple] = set()
     unique: list[CandidateAction] = []
     for c in candidates:

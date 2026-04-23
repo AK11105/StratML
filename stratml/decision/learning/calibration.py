@@ -13,7 +13,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from stratml.decision.learning.value_model import ValuePrediction, _DATASET_PATH, _MIN_ROWS
+from stratml.decision.learning.value_model import ValuePrediction, _MIN_ROWS
+import stratml.decision.learning.dataset_builder as _db
 
 log = logging.getLogger(__name__)
 
@@ -28,11 +29,8 @@ def _load_calibration_pairs(csv_path: Path):
         if len(df) < _MIN_ROWS:
             return None, None
 
-        # We need a predicted_gain column — it isn't stored yet, so fall back to stub
-        # until dataset_builder is extended to record it. For now use observed_gain
-        # as both predicted and actual to fit a no-op isotonic regression safely.
-        # When predicted_gain is added to the CSV this becomes meaningful.
-        y_pred = df["observed_gain"].astype(float).values
+        df = df[df["predicted_gain"].notna()]
+        y_pred = df["predicted_gain"].astype(float).values
         y_true = df["observed_gain"].astype(float).values
         return y_pred, y_true
     except Exception as exc:
@@ -42,7 +40,7 @@ def _load_calibration_pairs(csv_path: Path):
 
 def calibrate(predictions: list[ValuePrediction]) -> list[ValuePrediction]:
     """Correct predicted gains using fitted IsotonicRegression when data is available."""
-    y_pred_train, y_true_train = _load_calibration_pairs(_DATASET_PATH)
+    y_pred_train, y_true_train = _load_calibration_pairs(_db._UNIFIED_PATH)
 
     if y_pred_train is not None:
         try:
