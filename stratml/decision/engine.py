@@ -17,7 +17,7 @@ from stratml.core.schemas import ActionDecision, CandidateAction
 from stratml.decision.state.state_builder import build_state_from_profile, build_state
 from stratml.decision.state.state_history import ExperimentHistory
 from stratml.decision.actions.action_generator import generate
-from stratml.decision.learning.dataset_builder import record as record_dataset
+from stratml.decision.learning.dataset_builder import record as record_dataset, backfill_last_gain
 from stratml.decision.learning.value_model import predict
 from stratml.decision.learning.calibration import calibrate
 from stratml.decision.learning.uncertainty import estimate
@@ -50,12 +50,13 @@ class DecisionEngine:
         self.dl_hyperparams    = dl_hyperparams or {}
         self.run_id            = run_id or datetime.now(timezone.utc).strftime("run_%Y%m%d_%H%M%S")
 
-        self._history          = ExperimentHistory()
-        self._profile          = None
+        self._history               = ExperimentHistory()
+        self._profile               = None
         self._models_tried: list[str] = []
         self._repeated_configs: int   = 0
-        self._last_action: Optional[str] = None
+        self._last_action: Optional[str]   = None
         self._last_action_success: Optional[bool] = None
+        self._last_best_score: Optional[float]    = None  # for observed_gain backfill
 
         # Redirect all outputs under outputs/<run_id>/
         self._out_dir = Path("outputs") / self.run_id
@@ -64,7 +65,10 @@ class DecisionEngine:
         decision_logger._LOG_DIR      = self._out_dir / "decision_logs"
         counterfactual._CF_LOG        = self._out_dir / "decision_logs" / "counterfactual_log.jsonl"
         dataset_builder._DATASET_PATH = self._out_dir / "decision_logs" / "decision_dataset.csv"
-        _value_model._DATASET_PATH    = self._out_dir / "decision_logs" / "decision_dataset.csv"
+        dataset_builder._UNIFIED_PATH = Path("runs/decision_logs/decision_dataset.csv")
+        # value_model and uncertainty read from unified path so 50-row threshold
+        # counts across all runs, not just the current one
+        _value_model._DATASET_PATH    = Path("runs/decision_logs/decision_dataset.csv")
 
     def receive_profile(self, profile: DataProfile) -> ActionDecision:
         self._profile = profile
@@ -80,6 +84,12 @@ class DecisionEngine:
         return self._decide(state)
 
     def receive_result(self, result: ExperimentResult) -> ActionDecision:
+        # Backfill observed_gain for the previous decision row
+        if self._last_action is not None and self._last_best_score is not None:
+            current_score = getattr(result.metrics, self.primary_metric, None) or 0.0
+            gain = current_score - self._last_best_score
+            backfill_last_gain(gain)
+
         if result.model_name not in self._models_tried:
             self._models_tried.append(result.model_name)
         else:
@@ -120,11 +130,20 @@ class DecisionEngine:
         # Inject DL hyperparams when running in DL mode
         if self.dl_hyperparams and decision.action_type != "terminate":
             decision.parameters.update(self.dl_hyperparams)
+            
+        # Find predicted_gain for the selected action
+        selected_pred = next((p for p in predictions if p.action_type == decision.action_type), None)
+        predicted_gain = selected_pred.predicted_gain if selected_pred else 0.0
 
-        record_dataset(state, candidates[0])
+        record_dataset(
+            state,
+            CandidateAction(action_type=decision.action_type, parameters=decision.parameters),
+            predicted_gain=predicted_gain,
+        )
         decision_logger.log(state, candidates, decision)
         record_cf(decision)
 
         self._last_action         = decision.action_type
         self._last_action_success = None
+        self._last_best_score     = state.trajectory.best_score
         return decision

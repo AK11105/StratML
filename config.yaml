@@ -3,7 +3,7 @@ dataset:
   path: null
   target_column: null
 execution:
-  max_iterations: 5
+  max_iterations: 3
   timeout_per_run: 300
   random_seed: 42
 split:
