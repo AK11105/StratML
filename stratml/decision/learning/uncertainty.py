@@ -13,11 +13,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from stratml.core.schemas import StateObject
 from stratml.decision.learning.value_model import (
     ValuePrediction,
     _DATASET_PATH,
     _MIN_ROWS,
     _load_training_data,
+    _encode_state_action,
 )
 
 log = logging.getLogger(__name__)
@@ -35,7 +37,7 @@ class UncertaintyEstimate:
     variance: float
 
 
-def estimate(predictions: list[ValuePrediction]) -> list[UncertaintyEstimate]:
+def estimate(predictions: list[ValuePrediction], state: "StateObject | None" = None) -> list[UncertaintyEstimate]:
     """Wrap each prediction with confidence/variance from ensemble when data is available."""
     X_train, y_train = _load_training_data(_DATASET_PATH)
 
@@ -44,22 +46,20 @@ def estimate(predictions: list[ValuePrediction]) -> list[UncertaintyEstimate]:
             import numpy as np
             from sklearn.ensemble import RandomForestRegressor
 
-            # Train N_ESTIMATORS forests with different seeds
             models = [
                 RandomForestRegressor(n_estimators=20, random_state=seed).fit(X_train, y_train)
                 for seed in range(_N_ESTIMATORS)
             ]
 
-            # We need the original StateObject to re-encode — but we only have ValuePrediction here.
-            # Use predicted_gain as a proxy feature for variance estimation.
             results = []
             for p in predictions:
-                # Each model predicts from a 1-feature input (predicted_gain as proxy)
-                x_proxy = [[p.predicted_gain] + [0.0] * 10]  # pad to match training width
-                preds = np.array([m.predict(x_proxy)[0] for m in models])
+                if state is not None:
+                    x = [_encode_state_action(state, p.action_type)]
+                else:
+                    x = [[p.predicted_gain] + [0.0] * 12]  # proxy fallback
+                preds = np.array([m.predict(x)[0] for m in models])
                 variance = float(np.var(preds))
                 mean_pred = float(np.mean(preds))
-                # Confidence: inverse of normalised variance, clamped to [0,1]
                 confidence = round(max(0.0, min(1.0 - variance * 10, 1.0)), 4)
                 results.append(UncertaintyEstimate(
                     action_type=p.action_type,

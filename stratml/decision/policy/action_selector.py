@@ -18,20 +18,55 @@ from stratml.core.schemas import (
     PreprocessingConfig,
     StateObject,
 )
+import random
+from pathlib import Path
+
 from stratml.decision.agents.coordinator_agent import RankedAction
 
-_DEFAULT_PREPROCESSING = PreprocessingConfig(
-    missing_value_strategy="mean",
-    scaling="standard",
-    encoding="onehot",
-    imbalance_strategy="none",
-    feature_selection="none",
-)
+_EPSILON_LOW_DATA = 0.20
+_EPSILON_HIGH_DATA = 0.05
+_MIN_ROWS = 50
+
+
+def _row_count() -> int:
+    """Count filled observed_gain rows in the unified dataset."""
+    try:
+        import pandas as pd
+        p = Path("runs/decision_logs/decision_dataset.csv")
+        if not p.exists():
+            return 0
+        df = pd.read_csv(p)
+        return int(df["observed_gain"].notna().sum())
+    except Exception:
+        return 0
+
+_TREE_MODELS = {
+    "RandomForestClassifier", "GradientBoostingClassifier",
+    "ExtraTreesClassifier", "DecisionTreeClassifier",
+}
+
+
+def _build_preprocessing(state: StateObject) -> PreprocessingConfig:
+    imbalance = "oversample" if (state.dataset.imbalance_ratio or 1.0) > 2.0 else "none"
+    missing = "median" if (state.dataset.missing_ratio or 0.0) > 0.1 else "mean"
+    scaling = "none" if state.model.model_name in _TREE_MODELS else "standard"
+    return PreprocessingConfig(
+        missing_value_strategy=missing,
+        scaling=scaling,
+        encoding="onehot",
+        imbalance_strategy=imbalance,
+        feature_selection="none",
+    )
 
 
 def select(state: StateObject, ranked: list[RankedAction]) -> ActionDecision:
-    """Pick the highest-scored action and return an ActionDecision."""
-    best = ranked[0]
+    """Pick an action using epsilon-greedy exploration, then return an ActionDecision."""
+    epsilon = _EPSILON_LOW_DATA if _row_count() < _MIN_ROWS else _EPSILON_HIGH_DATA
+    non_terminate = [r for r in ranked if r.action_type != "terminate"]
+    if non_terminate and random.random() < epsilon:
+        best = random.choice(non_terminate)
+    else:
+        best = ranked[0]
 
     trigger = _infer_trigger(state)
     evidence = _build_evidence(state)
@@ -46,7 +81,7 @@ def select(state: StateObject, ranked: list[RankedAction]) -> ActionDecision:
         iteration=state.meta.iteration,
         action_type=best.action_type,
         parameters=best.parameters,
-        preprocessing=_DEFAULT_PREPROCESSING,
+        preprocessing=_build_preprocessing(state),
         expected_gain=best.predicted_gain,
         expected_cost=best.predicted_cost,
         confidence=best.confidence,

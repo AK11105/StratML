@@ -115,6 +115,7 @@ def build_state(
     models_tried: Optional[list[str]] = None,
     repeated_configs: int = 0,
     remaining_budget: Optional[float] = None,
+    previous_signals=None,
 ) -> StateObject:
     """Iteration 1+ entry point — full pipeline from ExperimentResult."""
     if history is None:
@@ -214,6 +215,7 @@ def build_state(
             previous_action=previous_action,
             previous_action_success=previous_action_success,
             action_effect_magnitude=abs(improvement_rate) if improvement_rate else None,
+            previous_signals=previous_signals,
         ),
         constraints=StateConstraints(
             allowed_models=allowed_models or [],
