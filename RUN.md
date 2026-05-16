@@ -1,4 +1,4 @@
-# RUN.md — Running StratML (What's Implemented)
+# RUN.md — Running StratML
 
 Install the CLI first (one-time, run from PowerShell):
 
@@ -6,11 +6,11 @@ Install the CLI first (one-time, run from PowerShell):
 .\stratml\cli\install.ps1
 ```
 
-Then restart your terminal. All commands below use `stratml` directly.
+Then restart your terminal.
 
 ---
 
-## Step 1 — Check environment
+## Environment check
 
 ```bash
 stratml doctor
@@ -18,17 +18,59 @@ stratml doctor
 
 ---
 
-## Step 2 — Create a config
+## Profile a dataset
 
 ```bash
-stratml init
+stratml profile-data data/raw/titanic.csv Survived
+stratml profile-data data/raw/pima.csv Outcome
+stratml profile-data data/raw/wine_quality_red.csv quality
+stratml profile-data data/raw/california_housing.csv MedHouseVal
+stratml profile-data data/external/creditcard.csv Class
+stratml profile-data data/raw/mnist.csv label
+stratml profile-data data/raw/energydata_complete.csv Appliances
 ```
-
-Edit the generated `config.yaml` — set `dataset.path` and `dataset.target_column`.
 
 ---
 
-## Step 3 — Validate config
+## Run a demo
+
+Each command below runs the full hardcoded demo for that dataset.  
+Edit `config.yaml` to set `dataset.path` before running, or pass `--path` inline.
+
+```bash
+# Classification — overfitting chain
+stratml run config.yaml --path data/external/titanic.csv 
+
+# Classification — imbalance + regularization
+stratml run config.yaml --path data/raw/pima.csv
+
+# Classification — multiclass, underfitting chain
+stratml run config.yaml --path data/raw/wine_quality_red.csv
+
+# Regression — smooth convergence
+stratml run config.yaml --path data/raw/california_housing.csv
+
+# Classification — extreme imbalance (fraud)
+stratml run config.yaml --path data/external/creditcard.csv
+
+# Multiclass image classification (DL)
+stratml run config.yaml --path data/raw/mnist.csv
+
+# Regression — multi-output energy forecasting
+stratml run config.yaml --path data/raw/energydata_complete.csv
+```
+
+---
+
+## Dry-run (resolve config without executing)
+
+```bash
+stratml run config.yaml --path data/external/titanic.csv --dry-run
+```
+
+---
+
+## Validate config
 
 ```bash
 stratml validate-config config.yaml
@@ -36,28 +78,15 @@ stratml validate-config config.yaml
 
 ---
 
-## Step 4 — Profile a dataset
+## Generate a fresh config
 
 ```bash
-stratml profile-data data/iris.csv species
+stratml init
 ```
-
-Prints a full dataset profile to the terminal.  
-Saves JSON to `outputs/iris/data_profile.json`.
 
 ---
 
-## Step 5 — Dry-run the pipeline
-
-```bash
-stratml run config.yaml --path data/iris.csv --dry-run
-```
-
-Resolves and prints the full config. Orchestrator not yet connected — `run` without `--dry-run` prints a placeholder.
-
----
-
-## What's Implemented
+## Status
 
 | Component | Status |
 |---|---|
@@ -66,7 +95,5 @@ Resolves and prints the full config. Orchestrator not yet connected — `run` wi
 | `stratml validate-config` | ✅ |
 | `stratml profile-data` | ✅ |
 | `stratml run --dry-run` | ✅ |
-| `stratml run` (full pipeline) | 🔲 orchestrator not connected |
-| ML/DL pipelines | 🔲 |
-| Decision agent / rule engine | 🔲 |
-| MLflow / TensorBoard / LangSmith | 🔲 |
+| `stratml run` (demo datasets) | ✅ hardcoded |
+| `stratml run` (real pipeline) | 🔲 |
