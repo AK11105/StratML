@@ -166,8 +166,12 @@ class DecisionEngine:
         self._last_best_score     = state.trajectory.best_score
         self._last_signals        = state.signals
         self._last_decision       = decision
-        if decision.action_type == "terminate" and self._profile is not None:
-            meta = _extract_meta(self._profile)
-            best_model = state.search.models_tried[-1] if state.search.models_tried else "unknown"
-            _meta_memory.record_run(meta, best_model, state.trajectory.best_score, self.run_id)
+        if decision.action_type == "terminate":
+            # Backfill the terminate row immediately — no further result will arrive.
+            # gain=0.0 because termination produces no score change.
+            backfill_last_gain(0.0)
+            if self._profile is not None:
+                meta = _extract_meta(self._profile)
+                best_model = state.search.models_tried[-1] if state.search.models_tried else "unknown"
+                _meta_memory.record_run(meta, best_model, state.trajectory.best_score, self.run_id)
         return decision
