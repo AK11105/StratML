@@ -31,26 +31,30 @@ class TestActionTypeMapping:
         config = build_experiment_config(_action("switch_model", {"model_name": "Ridge"}))
         assert config.model_name == "Ridge"
 
-    def test_switch_model_passes_hyperparams(self):
+    def test_switch_model_clears_hyperparams(self):
+        # switch_model does a fresh start — extra params are dropped
         config = build_experiment_config(_action("switch_model", {"model_name": "Ridge", "alpha": 0.5}))
-        assert config.hyperparameters.get("alpha") == 0.5
+        assert config.hyperparameters == {}
 
     def test_increase_capacity(self):
-        config = build_experiment_config(_action("increase_model_capacity", {"model_name": "RandomForestClassifier", "n_estimators": 200}))
+        # scale=1.5 applied to default base of 100 -> 150
+        config = build_experiment_config(_action("increase_model_capacity", {"model_name": "RandomForestClassifier", "scale": 1.5}))
         assert config.model_name == "RandomForestClassifier"
-        assert config.hyperparameters.get("n_estimators") == 200
+        assert config.hyperparameters.get("n_estimators") == 150
 
     def test_decrease_capacity(self):
         config = build_experiment_config(_action("decrease_model_capacity", {"model_name": "RandomForestClassifier", "n_estimators": 10}))
         assert config.model_name == "RandomForestClassifier"
 
     def test_modify_regularization(self):
-        config = build_experiment_config(_action("modify_regularization", {"model_name": "LogisticRegression", "C": 0.1}))
-        assert config.hyperparameters.get("C") == 0.1
+        # direction="increase" reduces C by 0.1x from default 1.0 -> 0.1
+        config = build_experiment_config(_action("modify_regularization", {"model_name": "LogisticRegression", "direction": "increase"}))
+        assert config.hyperparameters.get("C") == pytest.approx(0.1, rel=1e-3)
 
     def test_change_optimizer(self):
-        config = build_experiment_config(_action("change_optimizer", {"model_name": "MLP", "learning_rate": 0.01}))
-        assert config.hyperparameters.get("learning_rate") == 0.01
+        # lr_scale=0.1 applied to default lr=0.1 -> 0.01
+        config = build_experiment_config(_action("change_optimizer", {"model_name": "MLP", "learning_rate_scale": 0.1}))
+        assert config.hyperparameters.get("learning_rate") == pytest.approx(0.01, rel=1e-3)
 
     def test_apply_preprocessing_keeps_model(self):
         config = build_experiment_config(_action("apply_preprocessing", {"model_name": "SVC"}))
@@ -61,9 +65,10 @@ class TestActionTypeMapping:
         assert config.early_stopping is True
         assert config.early_stopping_patience == 7
 
-    def test_terminate_raises(self):
-        with pytest.raises(ValueError, match="terminate"):
-            build_experiment_config(_action("terminate", {}))
+    def test_terminate_does_not_raise(self):
+        # terminate is handled gracefully — no ValueError
+        config = build_experiment_config(_action("terminate", {}))
+        assert config is not None
 
 
 class TestModelTypeInference:

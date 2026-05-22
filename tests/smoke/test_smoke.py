@@ -39,13 +39,13 @@ class TestImports:
 class TestLoaderSmoke:
     def test_csv_loads(self):
         from stratml.execution.data.loader import load_dataframe
-        df, name = load_dataframe("data/iris.csv")
+        df, name = load_dataframe("data/raw/iris.csv")
         assert len(df) > 0
         assert name == "iris"
 
     def test_housing_csv_loads(self):
         from stratml.execution.data.loader import load_dataframe
-        df, name = load_dataframe("data/housing.csv")
+        df, name = load_dataframe("data/raw/california_housing.csv")
         assert len(df) > 0
 
     def test_missing_file_raises(self):
@@ -66,7 +66,7 @@ class TestProfilerSmoke:
         from stratml.execution.data.loader import load_dataframe
         from stratml.execution.data.validator import build_dataset
         from stratml.execution.data.profiler import build_profile
-        df, name = load_dataframe("data/iris.csv")
+        df, name = load_dataframe("data/raw/iris.csv")
         dataset = build_dataset(df, name, "species")
         profile = build_profile(dataset)
         assert profile.problem_type == "classification"
@@ -76,7 +76,7 @@ class TestProfilerSmoke:
         from stratml.execution.data.loader import load_dataframe
         from stratml.execution.data.validator import build_dataset
         from stratml.execution.data.profiler import build_profile
-        df, name = load_dataframe("data/housing.csv")
+        df, name = load_dataframe("data/raw/california_housing.csv")
         dataset = build_dataset(df, name, "MedHouseVal")
         profile = build_profile(dataset)
         assert profile.problem_type == "regression"
@@ -89,7 +89,7 @@ class TestSplitterSmoke:
         from stratml.execution.data.profiler import build_profile
         from stratml.execution.preprocessing.splitter import split_dataset
         from stratml.execution.schemas import SplitConfig
-        df, name = load_dataframe("data/iris.csv")
+        df, name = load_dataframe("data/raw/iris.csv")
         dataset = build_dataset(df, name, "species")
         profile = build_profile(dataset)
         split = split_dataset(dataset, SplitConfig(method="stratified"), profile.problem_type)
@@ -108,7 +108,7 @@ class TestMLPipelineSmoke:
         from stratml.execution.pipelines.ml_pipeline import run_ml_pipeline
         from stratml.execution.schemas import ExperimentConfig, PreprocessingConfig, SplitConfig
 
-        df, name = load_dataframe("data/iris.csv")
+        df, name = load_dataframe("data/raw/iris.csv")
         dataset  = build_dataset(df, name, "species")
         profile  = build_profile(dataset)
         split    = split_dataset(dataset, SplitConfig(method="stratified"), "classification")

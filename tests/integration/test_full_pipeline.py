@@ -71,31 +71,31 @@ def _run_one_iteration(dataset_path, target, model_name, exp_id="int_test"):
 
 class TestIrisPipeline:
     def test_experiment_result_valid(self):
-        result = _run_one_iteration("data/iris.csv", "species", "RandomForestClassifier")
+        result = _run_one_iteration("data/raw/iris.csv", "species", "RandomForestClassifier")
         assert result.experiment_id == "int_test"
         assert result.iteration == 1
         assert result.dataset_name == "iris"
 
     def test_classification_metrics_populated(self):
-        result = _run_one_iteration("data/iris.csv", "species", "RandomForestClassifier")
+        result = _run_one_iteration("data/raw/iris.csv", "species", "RandomForestClassifier")
         assert result.metrics.accuracy is not None
         assert result.metrics.f1_score is not None
         assert result.metrics.mse is None  # not a regression run
 
     def test_accuracy_reasonable(self):
-        result = _run_one_iteration("data/iris.csv", "species", "RandomForestClassifier")
+        result = _run_one_iteration("data/raw/iris.csv", "species", "RandomForestClassifier")
         assert result.metrics.accuracy > 0.7  # iris is easy — RF should do well
 
     def test_train_curve_non_empty(self):
-        result = _run_one_iteration("data/iris.csv", "species", "RandomForestClassifier")
+        result = _run_one_iteration("data/raw/iris.csv", "species", "RandomForestClassifier")
         assert len(result.train_curve) >= 1
 
     def test_runtime_positive(self):
-        result = _run_one_iteration("data/iris.csv", "species", "RandomForestClassifier")
+        result = _run_one_iteration("data/raw/iris.csv", "species", "RandomForestClassifier")
         assert result.runtime > 0
 
     def test_model_type_is_ml(self):
-        result = _run_one_iteration("data/iris.csv", "species", "RandomForestClassifier")
+        result = _run_one_iteration("data/raw/iris.csv", "species", "RandomForestClassifier")
         assert result.model_type == "ml"
 
 
@@ -103,18 +103,18 @@ class TestIrisPipeline:
 
 class TestHousingPipeline:
     def test_experiment_result_valid(self):
-        result = _run_one_iteration("data/housing.csv", "MedHouseVal", "RandomForestRegressor")
-        assert result.dataset_name == "housing"
+        result = _run_one_iteration("data/raw/california_housing.csv", "MedHouseVal", "RandomForestRegressor")
+        assert result.dataset_name == "california_housing"
 
     def test_regression_metrics_populated(self):
-        result = _run_one_iteration("data/housing.csv", "MedHouseVal", "RandomForestRegressor")
+        result = _run_one_iteration("data/raw/california_housing.csv", "MedHouseVal", "RandomForestRegressor")
         assert result.metrics.mse is not None
         assert result.metrics.rmse is not None
         assert result.metrics.r2 is not None
         assert result.metrics.accuracy is None  # not a classification run
 
     def test_r2_reasonable(self):
-        result = _run_one_iteration("data/housing.csv", "MedHouseVal", "RandomForestRegressor")
+        result = _run_one_iteration("data/raw/california_housing.csv", "MedHouseVal", "RandomForestRegressor")
         assert result.metrics.r2 > 0.5  # RF on housing should get decent R2
 
 
@@ -126,7 +126,7 @@ class TestMultiIteration:
         models = ["LogisticRegression", "RandomForestClassifier", "GradientBoostingClassifier"]
         results = []
         for i, model in enumerate(models, start=1):
-            r = _run_one_iteration("data/iris.csv", "species", model, exp_id=f"iter_{i}")
+            r = _run_one_iteration("data/raw/iris.csv", "species", model, exp_id=f"iter_{i}")
             results.append(r)
 
         assert len(results) == 3
@@ -136,7 +136,7 @@ class TestMultiIteration:
 
     def test_action_type_increase_capacity(self):
         """increase_model_capacity action type should produce a valid result."""
-        df, name = load_dataframe("data/iris.csv")
+        df, name = load_dataframe("data/raw/iris.csv")
         dataset  = build_dataset(df, name, "species")
         profile  = build_profile(dataset)
         split    = split_dataset(dataset, SplitConfig(method="stratified"), "classification")
@@ -144,7 +144,7 @@ class TestMultiIteration:
         action = ActionDecision(
             experiment_id="cap_test",
             action_type="increase_model_capacity",
-            parameters={"model_name": "RandomForestClassifier", "n_estimators": 50},
+            parameters={"model_name": "RandomForestClassifier", "scale": 1.5},
             preprocessing=_prep(),
             reason="test", expected_gain=0.05, expected_cost=2.0, confidence=0.8,
         )
@@ -154,4 +154,4 @@ class TestMultiIteration:
         metrics     = compute_metrics(clean.y_val, pipe.y_val_pred, pipe.train_curve, pipe.val_curve, "classification")
 
         assert metrics.accuracy is not None
-        assert config.hyperparameters.get("n_estimators") == 50
+        assert config.hyperparameters.get("n_estimators") == 150  # scale=1.5 * base 100
