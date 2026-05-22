@@ -42,7 +42,7 @@ ITERS = [
      "switch_model", {"model_name": "SVC"}),
 
     # SVC: similar accuracy, tl=0.333 → no memorization, converging (verified)
-    ("SVC",                       "switch_model",           "stagnating",         0.57, 0.6094, 0.5842, 0.5852, 0.6094, 0.3326, 0.3906, 0.058,  0.04,
+    ("SVC",                       "switch_model",           "stagnating",         0.57, 0.6312, 0.6089, 0.6104, 0.6312, 0.3326, 0.3906, 0.058,  0.04,
      {"converged": "weak", "converged_confidence": 0.49, "well_fitted": "weak", "well_fitted_confidence": 0.44},
      "terminate", {}),
 ]
@@ -110,7 +110,7 @@ def run(run_id: str | None = None) -> None:
         if i == max_iter - 1 and next_act != "terminate":
             next_act, next_params = "terminate", {}
         ui_iter_start(iter_num, model, action)
-        _sleep(rt * 4)
+        _sleep(rt)
         ui_training(model, rt)
 
         if model not in models_tried:

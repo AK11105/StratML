@@ -1,15 +1,21 @@
 """
 dl_pipeline.py
 --------------
-Phase 5 (DL) — PyTorch training loop.
+Phase 5 (DL) -- PyTorch training loop.
 
-Architectures live in dl_architectures.py — add new ones there.
+Architectures live in dl_architectures.py -- add new ones there.
 This file owns: device selection, data loading, training loop,
 early stopping, mixed precision, gradient clipping, TensorBoard.
+
+Modality paths:
+  tabular -- float32 features, unchanged
+  vision  -- reshape flat -> (C, H, W), ImageNet normalization for pretrained
+  text    -- int64 token IDs; BERT models receive attention_mask separately
 """
 
 from __future__ import annotations
 
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -17,13 +23,14 @@ from typing import Optional
 import numpy as np
 import torch
 import torch.nn as nn
+from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
 
 from stratml.execution.pipelines.dl_architectures import build_model
 from stratml.execution.schemas import ExperimentConfig, DataSplit
 
 
-# ── Device ────────────────────────────────────────────────────────────────────
+# -- Device -------------------------------------------------------------------
 
 def _get_device() -> torch.device:
     if torch.cuda.is_available():
@@ -33,13 +40,10 @@ def _get_device() -> torch.device:
     return torch.device("cpu")
 
 
-# ── Lazy Dataset ──────────────────────────────────────────────────────────────
+# -- Lazy Dataset -------------------------------------------------------------
 
 class _TabularDataset(Dataset):
-    """
-    Wraps numpy arrays as a PyTorch Dataset.
-    Converts slices to tensors per batch — no full GPU pre-allocation.
-    """
+    """Wraps numpy arrays as a PyTorch Dataset."""
     def __init__(self, X: np.ndarray, y: np.ndarray):
         self.X = X
         self.y = y
@@ -51,7 +55,7 @@ class _TabularDataset(Dataset):
         return torch.from_numpy(self.X[idx]), torch.from_numpy(self.y[idx : idx + 1]).squeeze(0)
 
 
-# ── Result ────────────────────────────────────────────────────────────────────
+# -- Result -------------------------------------------------------------------
 
 @dataclass
 class DLPipelineResult:
@@ -67,7 +71,7 @@ class DLPipelineResult:
     model_state: dict = field(default_factory=dict)
 
 
-# ── Main entry point ──────────────────────────────────────────────────────────
+# -- Main entry point ---------------------------------------------------------
 
 def run_dl_pipeline(
     config: ExperimentConfig,
@@ -83,8 +87,9 @@ def run_dl_pipeline(
         tensorboard_log_dir:  Optional path for TensorBoard SummaryWriter.
     """
     hp             = config.hyperparameters
-    arch           = str(hp.get("architecture", "MLP")).upper()
+    arch           = str(hp.get("architecture", "MLP"))
     task           = str(hp.get("task", "classification")).lower()
+    modality       = str(hp.get("modality", "tabular")).lower()
     lr             = float(hp.get("learning_rate", 1e-3))
     weight_decay   = float(hp.get("weight_decay", 0.0))
     batch_size     = int(hp.get("batch_size", 32))
@@ -97,7 +102,7 @@ def run_dl_pipeline(
     use_amp = mixed_prec and device.type == "cuda"
     scaler  = torch.amp.GradScaler("cuda") if use_amp else None
 
-    # ── Numpy arrays ──────────────────────────────────────────────────────────
+    # -- Numpy arrays ---------------------------------------------------------
     X_train_np = data_split.X_train.values.astype(np.float32)
     X_val_np   = data_split.X_val.values.astype(np.float32)
     input_dim  = X_train_np.shape[1]
@@ -116,20 +121,59 @@ def run_dl_pipeline(
         output_dim = len(classes)
         criterion  = nn.CrossEntropyLoss()
 
-    # ── DataLoaders ───────────────────────────────────────────────────────────
+    # -- Vision: reshape flat -> (C, H, W) and optionally normalize -----------
+    _imagenet_mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    _imagenet_std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    _arch_upper = arch.upper().replace("-", "").replace("_", "")
+    _is_pretrained_vision = _arch_upper in {"RESNET18", "EFFICIENTNETB0", "MOBILENETV3"}
+    _is_pretrained_text   = _arch_upper in {"DISTILBERT", "TINYBERT"}
+
+    if modality == "vision":
+        image_shape = tuple(hp.get("image_shape", (1, 28, 28)))
+        C, H, W = image_shape
+        X_train_np = X_train_np.reshape(-1, C, H, W)
+        X_val_np   = X_val_np.reshape(-1, C, H, W)
+        if _is_pretrained_vision and C == 1:
+            # Pretrained models expect 3-channel input; replicate channel
+            X_train_np = np.repeat(X_train_np, 3, axis=1)
+            X_val_np   = np.repeat(X_val_np,   3, axis=1)
+            C = 3
+        if _is_pretrained_vision:
+            # ImageNet normalization (values assumed in [0, 1])
+            X_train_np = (X_train_np - _imagenet_mean[:, None, None]) / _imagenet_std[:, None, None]
+            X_val_np   = (X_val_np   - _imagenet_mean[:, None, None]) / _imagenet_std[:, None, None]
+        hp = {**hp, "image_shape": (C, H, W)}
+        input_dim = C * H * W
+
+    # -- Text: input is int64 token IDs ---------------------------------------
+    _attention_mask_train: Optional[np.ndarray] = None
+    _attention_mask_val:   Optional[np.ndarray] = None
+    if modality == "text":
+        X_train_np = X_train_np.astype(np.int64)
+        X_val_np   = X_val_np.astype(np.int64)
+        if _is_pretrained_text:
+            _attention_mask_train = (X_train_np != 0).astype(np.int64)
+            _attention_mask_val   = (X_val_np   != 0).astype(np.int64)
+
+    # -- DataLoaders ----------------------------------------------------------
+    _x_dtype = np.int64 if modality == "text" else np.float32
     train_loader = DataLoader(
-        _TabularDataset(X_train_np, y_train_np),
+        _TabularDataset(X_train_np.astype(_x_dtype), y_train_np),
         batch_size=batch_size,
         shuffle=True,
         pin_memory=(device.type == "cuda"),
         num_workers=0,
     )
-    X_val_t = torch.tensor(X_val_np, device=device)
+    X_val_t = torch.tensor(X_val_np.astype(_x_dtype), device=device)
     y_val_t = torch.tensor(y_val_np, device=device)
     if task == "regression":
         y_val_t = y_val_t.reshape(-1, 1)
+    _mask_val_t = (
+        torch.tensor(_attention_mask_val, device=device)
+        if _attention_mask_val is not None else None
+    )
 
-    # ── Model + optimiser + scheduler ─────────────────────────────────────────
+    # -- Model + optimiser + scheduler ----------------------------------------
     model     = build_model(arch, input_dim, output_dim, hp).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -141,7 +185,7 @@ def run_dl_pipeline(
     elif scheduler_type == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-    # ── TensorBoard ───────────────────────────────────────────────────────────
+    # -- TensorBoard ----------------------------------------------------------
     writer = None
     if tensorboard_log_dir:
         try:
@@ -150,7 +194,7 @@ def run_dl_pipeline(
         except Exception:
             pass
 
-    # ── Training loop ─────────────────────────────────────────────────────────
+    # -- Training loop --------------------------------------------------------
     train_curve: list[float] = []
     val_curve:   list[float] = []
     best_val_loss    = float("inf")
@@ -162,7 +206,9 @@ def run_dl_pipeline(
 
     t0 = time.perf_counter()
 
-    for epoch in range(epochs):
+    for epoch in tqdm(range(epochs), desc=f"  {arch}", unit="epoch", ncols=None,
+                      dynamic_ncols=True, file=sys.stderr,
+                      bar_format="  {l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"):
         model.train()
         epoch_loss = 0.0
 
@@ -171,9 +217,16 @@ def run_dl_pipeline(
             yb = yb.to(device, non_blocking=True)
             optimizer.zero_grad()
 
+            def _forward(xb):
+                if _is_pretrained_text:
+                    # Build attention mask on-the-fly for this batch
+                    mask = (xb != 0).long()
+                    return model(xb, attention_mask=mask)
+                return model(xb)
+
             if use_amp:
                 with torch.amp.autocast("cuda"):
-                    loss = criterion(model(xb), yb)
+                    loss = criterion(_forward(xb), yb)
                 scaler.scale(loss).backward()
                 if grad_clip > 0.0:
                     scaler.unscale_(optimizer)
@@ -181,7 +234,7 @@ def run_dl_pipeline(
                 scaler.step(optimizer)
                 scaler.update()
             else:
-                loss = criterion(model(xb), yb)
+                loss = criterion(_forward(xb), yb)
                 loss.backward()
                 if grad_clip > 0.0:
                     nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -194,7 +247,11 @@ def run_dl_pipeline(
 
         model.eval()
         with torch.no_grad():
-            val_loss = round(criterion(model(X_val_t), y_val_t).item(), 6)
+            if _is_pretrained_text and _mask_val_t is not None:
+                val_out = model(X_val_t, attention_mask=_mask_val_t)
+            else:
+                val_out = model(X_val_t)
+            val_loss = round(criterion(val_out, y_val_t).item(), 6)
         val_curve.append(val_loss)
 
         if scheduler is not None:
@@ -227,10 +284,13 @@ def run_dl_pipeline(
     if best_state_dict is not None:
         model.load_state_dict({k: v.to(device) for k, v in best_state_dict.items()})
 
-    # ── Predictions ───────────────────────────────────────────────────────────
+    # -- Predictions ----------------------------------------------------------
     model.eval()
     with torch.no_grad():
-        out = model(X_val_t).cpu()
+        if _is_pretrained_text and _mask_val_t is not None:
+            out = model(X_val_t, attention_mask=_mask_val_t).cpu()
+        else:
+            out = model(X_val_t).cpu()
 
     if task == "regression":
         y_val_pred = out.squeeze(1).numpy()

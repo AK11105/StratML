@@ -1,11 +1,12 @@
 """
 reporting/pdf_builder.py
 ------------------------
-PDF generation using ReportLab — professional A4 report.
+PDF generation using ReportLab — professional A4 report with charts.
 """
 
 from __future__ import annotations
 
+import io
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import (
-    HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    HRFlowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
 )
 
 # ── Palette ───────────────────────────────────────────────────────────────────
@@ -288,6 +289,211 @@ def _build_trace(records, body_s):
     return items
 
 
+# ── Chart helpers ─────────────────────────────────────────────────────────────
+
+def _fig_to_image(fig, width_cm: float, height_cm: float) -> Image:
+    """Render a matplotlib figure to an in-memory PNG and return a ReportLab Image."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    buf.seek(0)
+    import matplotlib.pyplot as plt
+    plt.close(fig)
+    return Image(buf, width=width_cm * cm, height=height_cm * cm)
+
+
+def _chart_performance(records: list[dict]) -> Image | None:
+    """Line chart: primary metric per iteration."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as ticker
+
+        iters   = [r["iteration"] for r in records]
+        primary = [r["state_snapshot"]["metrics"].get("primary") or 0 for r in records]
+        gaps    = [r["state_snapshot"]["metrics"].get("train_val_gap") or 0 for r in records]
+        models  = [r["state_snapshot"]["model"]["model_name"] for r in records]
+
+        fig, ax1 = plt.subplots(figsize=(7.5, 2.8))
+        fig.patch.set_facecolor("#f8fafc")
+        ax1.set_facecolor("#f8fafc")
+
+        ax1.plot(iters, primary, "o-", color="#2563eb", linewidth=2, markersize=6,
+                 label="Primary metric", zorder=3)
+        ax1.fill_between(iters, primary, alpha=0.08, color="#2563eb")
+
+        ax2 = ax1.twinx()
+        ax2.bar(iters, gaps, alpha=0.25, color="#dc2626", width=0.4, label="Train/val gap")
+        ax2.set_ylabel("Train/val gap", fontsize=7, color="#dc2626")
+        ax2.tick_params(axis="y", labelcolor="#dc2626", labelsize=7)
+        ax2.set_ylim(0, max(max(gaps) * 2.5, 0.3))
+
+        # Annotate model names
+        for i, (x, y, m) in enumerate(zip(iters, primary, models)):
+            short = m.replace("Classifier", "").replace("Regressor", "")[:14]
+            ax1.annotate(short, (x, y), textcoords="offset points", xytext=(0, 7),
+                         ha="center", fontsize=6, color="#1a2744")
+
+        ax1.set_xlabel("Iteration", fontsize=8)
+        ax1.set_ylabel("Primary metric", fontsize=8, color="#2563eb")
+        ax1.tick_params(axis="y", labelcolor="#2563eb", labelsize=7)
+        ax1.tick_params(axis="x", labelsize=7)
+        ax1.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+        ax1.set_title("Performance & Generalization Gap per Iteration", fontsize=9,
+                      color="#1a2744", pad=6)
+        ax1.grid(axis="y", linestyle="--", alpha=0.4, color="#cbd5e1")
+        ax1.spines[["top", "right"]].set_visible(False)
+        ax2.spines[["top"]].set_visible(False)
+
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, fontsize=7, loc="lower right",
+                   framealpha=0.7)
+        fig.tight_layout()
+        return _fig_to_image(fig, 16.6, 6.5)
+    except Exception:
+        return None
+
+
+def _chart_signals(records: list[dict]) -> Image | None:
+    """Heatmap: signal strength per iteration."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        _SIGNAL_KEYS = ["underfitting", "overfitting", "well_fitted", "converged",
+                        "stagnating", "too_slow", "diminishing_returns", "diverging"]
+        _STRENGTH = {"none": 0, "weak": 1, "strong": 2}
+
+        iters = [r["iteration"] for r in records]
+        matrix = []
+        for key in _SIGNAL_KEYS:
+            row = [_STRENGTH.get(r["state_snapshot"]["signals"].get(key, "none"), 0)
+                   for r in records]
+            matrix.append(row)
+
+        data = np.array(matrix, dtype=float)
+        # Skip all-zero rows
+        active_mask = data.any(axis=1)
+        if not active_mask.any():
+            return None
+        data    = data[active_mask]
+        labels  = [k for k, m in zip(_SIGNAL_KEYS, active_mask) if m]
+
+        fig, ax = plt.subplots(figsize=(7.5, max(1.8, len(labels) * 0.55 + 0.6)))
+        fig.patch.set_facecolor("#f8fafc")
+        ax.set_facecolor("#f8fafc")
+
+        cmap = plt.cm.get_cmap("RdYlGn_r", 3)
+        im = ax.imshow(data, aspect="auto", cmap=cmap, vmin=0, vmax=2,
+                       interpolation="nearest")
+
+        ax.set_xticks(range(len(iters)))
+        ax.set_xticklabels([f"Iter {i}" for i in iters], fontsize=7)
+        ax.set_yticks(range(len(labels)))
+        ax.set_yticklabels(labels, fontsize=7)
+        ax.set_title("Signal Heatmap (0=none, 1=weak, 2=strong)", fontsize=9,
+                     color="#1a2744", pad=6)
+
+        cbar = fig.colorbar(im, ax=ax, ticks=[0, 1, 2], fraction=0.03, pad=0.02)
+        cbar.ax.set_yticklabels(["none", "weak", "strong"], fontsize=6)
+
+        # Cell text
+        for r in range(len(labels)):
+            for c in range(len(iters)):
+                v = int(data[r, c])
+                if v > 0:
+                    ax.text(c, r, ["", "W", "S"][v], ha="center", va="center",
+                            fontsize=7, color="white", fontweight="bold")
+
+        fig.tight_layout()
+        return _fig_to_image(fig, 16.6, max(3.5, len(labels) * 0.7 + 1.2))
+    except Exception:
+        return None
+
+
+def _chart_runtime(records: list[dict]) -> Image | None:
+    """Horizontal bar chart: runtime per model."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        models   = [r["state_snapshot"]["model"]["model_name"] for r in records]
+        runtimes = [r["state_snapshot"]["model"].get("runtime") or 0 for r in records]
+        iters    = [r["iteration"] for r in records]
+
+        if all(rt == 0 for rt in runtimes):
+            return None
+
+        labels = [f"Iter {i}: {m[:18]}" for i, m in zip(iters, models)]
+        colors_bar = ["#2563eb" if rt < 60 else "#d97706" if rt < 300 else "#dc2626"
+                      for rt in runtimes]
+
+        fig, ax = plt.subplots(figsize=(7.5, max(2.0, len(records) * 0.45 + 0.8)))
+        fig.patch.set_facecolor("#f8fafc")
+        ax.set_facecolor("#f8fafc")
+
+        bars = ax.barh(labels, runtimes, color=colors_bar, height=0.55, edgecolor="white")
+        for bar, rt in zip(bars, runtimes):
+            ax.text(bar.get_width() + max(runtimes) * 0.01, bar.get_y() + bar.get_height() / 2,
+                    f"{rt:.1f}s", va="center", fontsize=7, color="#334155")
+
+        ax.set_xlabel("Runtime (seconds)", fontsize=8)
+        ax.set_title("Training Runtime per Iteration", fontsize=9, color="#1a2744", pad=6)
+        ax.tick_params(labelsize=7)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.grid(axis="x", linestyle="--", alpha=0.4, color="#cbd5e1")
+        ax.invert_yaxis()
+        fig.tight_layout()
+        return _fig_to_image(fig, 16.6, max(3.0, len(records) * 0.6 + 1.2))
+    except Exception:
+        return None
+
+
+def _chart_agent_scores(records: list[dict]) -> Image | None:
+    """Grouped bar chart: agent scores per iteration."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        iters = [r["iteration"] for r in records]
+        perf  = [r["selected_action"].get("agent_scores", {}).get("performance") or 0 for r in records]
+        eff   = [r["selected_action"].get("agent_scores", {}).get("efficiency")  or 0 for r in records]
+        stab  = [r["selected_action"].get("agent_scores", {}).get("stability")   or 0 for r in records]
+
+        if all(v == 0 for v in perf + eff + stab):
+            return None
+
+        x = np.arange(len(iters))
+        w = 0.25
+        fig, ax = plt.subplots(figsize=(7.5, 2.8))
+        fig.patch.set_facecolor("#f8fafc")
+        ax.set_facecolor("#f8fafc")
+
+        ax.bar(x - w, perf, w, label="Performance", color="#2563eb", alpha=0.85)
+        ax.bar(x,     eff,  w, label="Efficiency",  color="#16a34a", alpha=0.85)
+        ax.bar(x + w, stab, w, label="Stability",   color="#d97706", alpha=0.85)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"Iter {i}" for i in iters], fontsize=7)
+        ax.set_ylabel("Score", fontsize=8)
+        ax.set_ylim(0, 1.15)
+        ax.set_title("Agent Scores for Selected Action", fontsize=9, color="#1a2744", pad=6)
+        ax.legend(fontsize=7, loc="upper right", framealpha=0.7)
+        ax.tick_params(labelsize=7)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.grid(axis="y", linestyle="--", alpha=0.4, color="#cbd5e1")
+        fig.tight_layout()
+        return _fig_to_image(fig, 16.6, 5.5)
+    except Exception:
+        return None
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def build_pdf(
@@ -346,5 +552,28 @@ def build_pdf(
     # ── Decision trace ────────────────────────────────────────────────────────
     _section(story, "Decision Trace", st)
     story.extend(_build_trace(records, st["body"]))
+
+    # ── Visualizations ────────────────────────────────────────────────────────
+    if records:
+        _section(story, "Visualizations", st)
+
+        perf_img = _chart_performance(records)
+        if perf_img:
+            story.append(perf_img)
+            story.append(Spacer(1, 0.4*cm))
+
+        sig_img = _chart_signals(records)
+        if sig_img:
+            story.append(sig_img)
+            story.append(Spacer(1, 0.4*cm))
+
+        agent_img = _chart_agent_scores(records)
+        if agent_img:
+            story.append(agent_img)
+            story.append(Spacer(1, 0.4*cm))
+
+        rt_img = _chart_runtime(records)
+        if rt_img:
+            story.append(rt_img)
 
     doc.build(story)

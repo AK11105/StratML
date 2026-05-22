@@ -1,4 +1,4 @@
-"""Demo: Titanic — Overfitting chain: regularize → reduce capacity → switch model."""
+"""Demo: CIFAR-10 Vision — CNN2D → ResNet18 → EfficientNetB0, too_slow path to MobileNetV3."""
 from __future__ import annotations
 import sys, time
 from datetime import datetime, timezone
@@ -9,51 +9,62 @@ from demo._base import (
     write_artifacts, write_model_py, write_decision_log, write_counterfactual,
     write_comparison, append_runs_log, write_report_pdf, write_langsmith_traces,
     make_state, _signals, _selected, _no_signals, _sleep, ROOT, load_config,
-    ui_header, ui_iter_start, ui_training, ui_result, ui_agents, ui_decision,
+    ui_header, ui_iter_start, ui_training_dl, ui_result, ui_agents, ui_decision,
     ui_signals, ui_summary, ui_artifacts, _console,
 )
+from tqdm import tqdm
 
-DATASET   = "titanic"
-TARGET    = "Survived"
-MAX_ITER  = 5
-DECISION_AGENT_DELAY = 1.8  # ~1.8s/LLM call x 6 agents = ~11s decision
-ROWS, COLS = 891, 11
-TRAIN, VAL, TEST = 534, 178, 179
+DATASET   = "cifar10"
+TARGET    = "label"
+MAX_ITER  = 4
+DECISION_AGENT_DELAY = 2.0
+ROWS, COLS = 60000, 3073   # 3072 pixels + 1 label col
+TRAIN, VAL, TEST = 40000, 10000, 10000
 
+# Decision chain per doc:
+# CNN2D (underfitting) → ResNet18 frozen (overfitting) → EfficientNetB0 + dropout (converged)
+# too_slow variant: ResNet18 → MobileNetV3
 ITERS = [
-    # RF default: tl=0.0 vs vl=0.157 → genuine overfitting (verified)
-    ("RandomForestClassifier", "switch_model",           "bootstrap",    0.50, 0.7709, 0.6917, 0.7188, 0.6667, 0.0,  0.1573, 0.1573, 0.16,
-     {"overfitting": "strong", "overfitting_confidence": 0.74},
-     "modify_regularization", {"direction": "increase"}),
+    # CNN2D baseline: underfitting (acc 0.72)
+    ("CNN2D",          "switch_model",    "bootstrap",          0.50, 0.7201, 0.7198, 0.7205, 0.7199, 0.12,  0.28,  0.16,  42.3,
+     {"underfitting": "strong", "underfitting_confidence": 0.81},
+     "switch_model", {"model_name": "ResNet18"}),
 
-    # RF max_depth=10 (regularized): overfitting reduced but persists
-    ("RandomForestClassifier", "modify_regularization",  "overfitting",  0.74, 0.7821, 0.7089, 0.7312, 0.6875, 0.04, 0.1421, 0.1021, 0.13,
-     {"overfitting": "weak", "overfitting_confidence": 0.58},
-     "decrease_model_capacity", {"scale": 0.75}),
+    # ResNet18 frozen: jump to 0.89 but overfitting
+    ("ResNet18",       "switch_model",    "underfitting",       0.72, 0.8903, 0.8901, 0.8908, 0.8899, 0.04,  0.11,  0.07,  187.6,
+     {"overfitting": "weak", "overfitting_confidence": 0.61},
+     "switch_model", {"model_name": "EfficientNetB0"}),
 
-    # RF n_estimators=50, max_depth=8: gap narrows further
-    ("RandomForestClassifier", "decrease_model_capacity","overfitting",  0.66, 0.7877, 0.7143, 0.7391, 0.6912, 0.07, 0.1318, 0.0618, 0.12,
-     {"overfitting": "weak", "overfitting_confidence": 0.49, "well_fitted": "weak", "well_fitted_confidence": 0.41},
-     "switch_model", {"model_name": "LogisticRegression"}),
-
-    # LR: tl≈vl → no overfitting, stagnating (verified)
-    ("LogisticRegression",     "switch_model",           "overfitting",  0.61, 0.7933, 0.7218, 0.75,   0.6957, 0.1966, 0.2022, 0.0056, 0.0,
-     {"stagnating": "weak", "stagnating_confidence": 0.44},
-     "switch_model", {"model_name": "GradientBoostingClassifier"}),
-
-    # GBM: best primary, some overfitting remains, converging (verified)
-    ("GradientBoostingClassifier","switch_model",        "stagnating",   0.57, 0.8247, 0.8119, 0.8301, 0.8247, 0.0412, 0.1309, 0.0897, 0.52,
-     {"converged": "weak", "converged_confidence": 0.58, "well_fitted": "weak", "well_fitted_confidence": 0.53},
+    # EfficientNetB0 + dropout: 0.91, converged
+    ("EfficientNetB0", "switch_model",    "overfitting",        0.78, 0.9112, 0.9109, 0.9115, 0.9107, 0.02,  0.09,  0.07,  214.8,
+     {"converged": "weak", "converged_confidence": 0.68, "well_fitted": "strong", "well_fitted_confidence": 0.74},
      "terminate", {}),
 ]
 
 DATASET_META = {
     "num_samples": ROWS, "num_features": COLS - 1,
-    "feature_to_sample_ratio": round((COLS-1)/ROWS, 6),
-    "missing_ratio": 0.19,
-    "class_distribution": {"0": 549, "1": 342},
-    "imbalance_ratio": 1.605,
+    "feature_to_sample_ratio": round((COLS - 1) / ROWS, 6),
+    "missing_ratio": 0.0,
+    "class_distribution": {str(i): 6000 for i in range(10)},
+    "imbalance_ratio": 1.0,
 }
+
+
+def _ui_epoch_bar(model: str, epochs: int, runtime: float) -> None:
+    """Show a tqdm epoch progress bar simulating DL training."""
+    step = runtime / max(epochs, 1)
+    bar = tqdm(
+        range(epochs),
+        desc=f"  {model}",
+        unit="epoch",
+        dynamic_ncols=True,
+        file=sys.stderr,
+        bar_format="  {l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
+        leave=False,
+    )
+    for _ in bar:
+        time.sleep(step)
+    bar.close()
 
 
 def run(run_id: str | None = None) -> None:
@@ -80,7 +91,8 @@ def run(run_id: str | None = None) -> None:
         "iteration": 0, "model": "none", "action": "switch_model", "trigger": "bootstrap",
         "confidence": 0.5, "primary_metric": 0.0, "train_val_gap": 0.0,
         "accuracy": None, "f1_score": None, "precision": None, "recall": None,
-        "mse": None, "r2": None, "slope": 0.0, "volatility": 0.0, "runtime": 0.0, "active_signals": "",
+        "mse": None, "r2": None, "slope": 0.0, "volatility": 0.0, "runtime": 0.0,
+        "active_signals": "",
     }]
     runs_rows = []
     trace_entries = []
@@ -90,28 +102,31 @@ def run(run_id: str | None = None) -> None:
     prev_action = None
 
     write_decision_log(out_dir, run_id, 0, make_state(
-        run_id, 0, "none", "ml", {"accuracy": None, "gap": 0.0},
+        run_id, 0, "none", "dl", {"accuracy": None, "gap": 0.0},
         _no_signals(), DATASET_META,
         {"history_length": 0, "improvement_rate": 0.0, "slope": 0.0, "volatility": 0.0,
          "best_score": 0.0, "mean_score": 0.0, "steps_since_improvement": 0, "trend": "stagnating"},
         {"runtime": 0.0, "remaining_budget": float(max_iter), "budget_exhausted": False, "models_tried": []},
-        [{"action_type": "switch_model", "parameters": {"model_name": "RandomForestClassifier"}},
-         {"action_type": "switch_model", "parameters": {"model_name": "LogisticRegression"}}],
-        _selected(run_id, 0, "switch_model", {"model_name": "RandomForestClassifier"},
-                  "bootstrap", 0.5, 0.05, 0.5, 1.0),
+        [{"action_type": "switch_model", "parameters": {"model_name": "CNN2D"}},
+         {"action_type": "switch_model", "parameters": {"model_name": "ResNet18"}}],
+        _selected(run_id, 0, "switch_model", {"model_name": "CNN2D"}, "bootstrap", 0.5, 0.05, 0.5, 1.0),
         max_iter,
     ))
     cf_entries = [{"iteration": 0, "action_type": "switch_model",
-                   "parameters": {"model_name": "RandomForestClassifier"}, "confidence": 0.5}]
+                   "parameters": {"model_name": "CNN2D"}, "confidence": 0.5}]
+
+    _EPOCHS_MAP = {"CNN2D": 30, "ResNet18": 20, "EfficientNetB0": 20, "MobileNetV3": 20}
 
     for i, (model, action, trigger, conf, primary, f1, prec, rec,
             tl, vl, gap, rt, sig_kw, next_act, next_params) in enumerate(ITERS[:max_iter]):
         iter_num = i + 1
         if i == max_iter - 1 and next_act != "terminate":
             next_act, next_params = "terminate", {}
+
         ui_iter_start(iter_num, model, action)
-        _sleep(rt)
-        ui_training(model, rt)
+        epochs = _EPOCHS_MAP.get(model, 20)
+        _ui_epoch_bar(model, epochs, rt)
+        ui_training_dl(rt)
 
         if model not in models_tried:
             models_tried.append(model)
@@ -119,14 +134,14 @@ def run(run_id: str | None = None) -> None:
         prev_score = primary
         best_score = max(best_score, primary)
         slope = round(improvement, 6)
-        volatility = round(abs(slope) * 0.6, 6)
+        volatility = round(abs(slope) * 0.5, 6)
         remaining = max_iter - iter_num
 
         metrics = {"accuracy": primary, "f1_score": f1, "precision": prec, "recall": rec,
                    "train_loss": tl, "validation_loss": vl, "gap": gap,
                    "mse": None, "rmse": None, "r2": None}
         signals = _signals(**sig_kw)
-        active = [k for k in ["underfitting","overfitting","well_fitted","converged","stagnating"]
+        active = [k for k in ["underfitting", "overfitting", "converged", "well_fitted", "too_slow"]
                   if signals.get(k, "none") != "none"]
 
         traj = {"history_length": iter_num, "improvement_rate": round(improvement, 6),
@@ -137,28 +152,32 @@ def run(run_id: str | None = None) -> None:
                 "budget_exhausted": remaining <= 0, "models_tried": list(models_tried)}
 
         write_artifacts(out_dir, run_id, {"model": model},
-                        {k: v for k, v in metrics.items() if k not in ("gap",)},
-                        {"experiment_id": run_id, "model_name": model, "model_type": "ml",
-                         "hyperparameters": {}, "preprocessing": {
-                             "missing_value_strategy": "mean", "scaling": "standard",
-                             "encoding": "onehot", "imbalance_strategy": "none",
-                             "feature_selection": "none"},
-                         "early_stopping": False, "early_stopping_patience": 5})
+                        {k: v for k, v in metrics.items() if k != "gap"},
+                        {"experiment_id": run_id, "model_name": model, "model_type": "dl",
+                         "hyperparameters": {"architecture": model, "modality": "vision",
+                                             "image_shape": [3, 32, 32], "epochs": epochs},
+                         "preprocessing": {"missing_value_strategy": "none", "scaling": "minmax",
+                                           "encoding": "none", "imbalance_strategy": "none",
+                                           "feature_selection": "none"},
+                         "early_stopping": True, "early_stopping_patience": 5})
 
         _evidence = {"trigger": trigger, "confidence": round(conf, 2),
                      "train_val_gap": round(gap, 4), "primary_metric": round(primary, 4),
-                     **{k: signals[k] for k in ['overfitting', 'underfitting', 'stagnating', 'converged', 'well_fitted', 'too_slow', 'diminishing_returns'] if signals[k] != "none"}}
+                     **{k: signals[k] for k in ["overfitting", "underfitting", "converged",
+                                                 "well_fitted", "too_slow"]
+                        if signals[k] != "none"}}
         sel = _selected(run_id, iter_num, next_act, next_params, trigger, conf,
-                        round(primary * 0.95, 3), 0.75, round(primary * 0.9, 3),
-                                evidence=_evidence)
-        _HPARAMS_MAP = {('RandomForestClassifier', 'switch_model'): {'n_estimators': 100, 'max_depth': None, 'random_state': 42}, ('RandomForestClassifier', 'modify_regularization'): {'n_estimators': 100, 'max_depth': 10, 'random_state': 42}, ('RandomForestClassifier', 'decrease_model_capacity'): {'n_estimators': 50, 'max_depth': 8, 'random_state': 42}, ('LogisticRegression', 'switch_model'): {'C': 1.0, 'max_iter': 200, 'solver': 'lbfgs', 'random_state': 42}, ('GradientBoostingClassifier', 'switch_model'): {'n_estimators': 100, 'max_depth': 3, 'learning_rate': 0.1, 'random_state': 42}}
-        _hparams = _HPARAMS_MAP.get((model, action), {})
+                        round(primary * 0.95, 3), 0.65, round(primary * 0.9, 3),
+                        evidence=_evidence)
+
         write_decision_log(out_dir, run_id, iter_num, make_state(
-            run_id, iter_num, model, "ml", metrics, signals, DATASET_META,
-            traj, res, [{"action_type": next_act, "parameters": next_params},
-                        {"action_type": "terminate", "parameters": {}}],
+            run_id, iter_num, model, "dl", metrics, signals, DATASET_META,
+            traj, res,
+            [{"action_type": next_act, "parameters": next_params},
+             {"action_type": "terminate", "parameters": {}}],
             sel, max_iter, previous_action=prev_action, time_budget=time_budget,
-            hyperparameters=_hparams,
+            hyperparameters={"architecture": model, "modality": "vision",
+                             "image_shape": [3, 32, 32], "epochs": epochs},
         ))
         cf_entries.append({"iteration": iter_num, "action_type": next_act,
                            "parameters": next_params, "confidence": conf})
@@ -179,7 +198,7 @@ def run(run_id: str | None = None) -> None:
             "underfitting": signals["underfitting"], "overfitting": signals["overfitting"],
             "well_fitted": signals["well_fitted"], "converged": signals["converged"],
             "stagnating": signals["stagnating"],
-            "num_samples": ROWS, "num_features": COLS - 1, "missing_ratio": 0.19,
+            "num_samples": ROWS, "num_features": COLS - 1, "missing_ratio": 0.0,
             "runtime": rt, "remaining_budget": float(remaining),
             "action_type": next_act, "action_params": str(next_params),
             "predicted_gain": 0.05, "observed_gain": round(improvement, 6),
@@ -194,14 +213,11 @@ def run(run_id: str | None = None) -> None:
         _conf = 1.0 if next_act == "terminate" else conf
         _par  = {} if next_act == "terminate" else next_params
         ui_decision(_act, _trig, _conf, _par)
-        _ts = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()
+
+        _ts = datetime.now(timezone.utc).isoformat()
         trace_entries.append({
-            "iteration": iter_num,
-            "start_time": _ts,
-            "end_time": _ts,
-            "model": model,
-            "signals": signals,
-            "metrics": metrics,
+            "iteration": iter_num, "start_time": _ts, "end_time": _ts,
+            "model": model, "signals": signals, "metrics": metrics,
             "selected_action": sel,
             "candidates": [{"action_type": next_act, "parameters": next_params},
                            {"action_type": "terminate", "parameters": {}}],
@@ -213,25 +229,27 @@ def run(run_id: str | None = None) -> None:
                 "stability_scores":   {next_act: round(sel["agent_scores"]["stability"], 4),
                                        "terminate": 0.95},
             },
-            "slope": slope,
-            "volatility": volatility,
-            "runtime": rt,
+            "slope": slope, "volatility": volatility, "runtime": rt,
             "remaining_budget": remaining,
         })
         prev_action = action
 
-    ui_summary(run_id, out_dir, best_score, "GradientBoostingClassifier", "accuracy", comparison_rows)
+    best_model = max(comparison_rows[1:], key=lambda r: r["primary_metric"])["model"]
+    ui_summary(run_id, out_dir, best_score, best_model, "accuracy", comparison_rows)
 
     write_counterfactual(out_dir, run_id, cf_entries)
     ls_traces = write_langsmith_traces(out_dir, run_id, trace_entries)
     write_comparison(out_dir, comparison_rows)
     append_runs_log(run_id, runs_rows)
-    write_model_py(out_dir, run_id, "GradientBoostingClassifier", best_score,
-                   {"n_estimators": 100, "max_depth": 3, "learning_rate": 0.1, "random_state": 42})
+    write_model_py(out_dir, run_id, best_model, best_score,
+                   {"architecture": best_model, "modality": "vision",
+                    "image_shape": [3, 32, 32], "frozen": False}, model_type="dl")
     pdf = write_report_pdf(out_dir, run_id, DATASET, comparison_rows)
 
     ui_artifacts(out_dir, ls_traces, pdf, out_dir / "model.py")
-    answer = _console.input("  [dim]Download best model files (model.pkl + model.py)?[/dim] [bold]\[y/N][/bold]: ").strip().lower()
+    answer = _console.input(
+        "  [dim]Download best model files (model.pkl + model.py)?[/dim] [bold]\\[y/N][/bold]: "
+    ).strip().lower()
     if answer == "y":
         _console.print(f"  [green]Saved:[/green] {out_dir / 'artifacts' / run_id / 'model.pkl'}")
 

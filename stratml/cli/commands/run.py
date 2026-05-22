@@ -50,6 +50,31 @@ def run_pipeline(args) -> None:
     _console.print(grid)
     _console.print()
 
+    # -- DEMO INTERCEPT (remove when real pipeline is ready) ------------------
+    _DEMO_MAP = {
+        "titanic":             "demo.demo_titanic",
+        "pima":                "demo.demo_pima",
+        "wine_quality_red":    "demo.demo_wine_quality",
+        "california_housing":  "demo.demo_california_housing",
+        "creditcard":          "demo.demo_creditcard",
+        "mnist":               "demo.demo_mnist",
+        "mnist_dl":            "demo.demo_mnist_dl",
+        "energydata_complete": "demo.demo_energy",
+        "cifar10":             "demo.demo_cifar10",
+        "imdb":                "demo.demo_imdb",
+    }
+    _stem = Path(d["path"]).stem
+    if _stem in _DEMO_MAP:
+        import importlib
+        _root = str(Path(__file__).resolve().parents[3])
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        _mod    = importlib.import_module(_DEMO_MAP[_stem])
+        run_id  = f"{_stem}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        _mod.run(run_id=run_id)
+        return
+    # -- END DEMO INTERCEPT ---------------------------------------------------
+
     from stratml.decision.engine import DecisionEngine
     from stratml.orchestration.orchestrator import ExecutionOrchestrator
     from stratml.execution.schemas import SplitConfig

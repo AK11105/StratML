@@ -50,9 +50,20 @@ _VALID_ACTION_TYPES = {
     "decrease_model_capacity",
     "modify_regularization",
     "change_optimizer",
+    "unfreeze_backbone",
+    "switch_architecture",
     "early_stop",
     "add_preprocessing",
     "terminate",
+}
+
+_DL_VISION_MODELS  = ["CNN2D", "ResNet18", "EfficientNetB0", "MobileNetV3"]
+_DL_TEXT_MODELS    = ["TextCNN", "BiLSTM", "DistilBERT", "TinyBERT"]
+_DL_TABULAR_MODELS = ["MLP", "CNN1D", "RNN", "ResidualMLP", "TabTransformer"]
+
+_DL_TOO_SLOW_FALLBACK = {
+    "vision": "MobileNetV3",
+    "text":   "TinyBERT",
 }
 
 
@@ -175,6 +186,12 @@ def _rule_candidates(state: StateObject) -> list[CandidateAction]:
     sig = state.signals
     candidates: list[CandidateAction] = []
 
+    model_type = getattr(state.model, "model_type", "ml")
+    modality   = getattr(state.model, "modality", "tabular") if hasattr(state.model, "modality") else "tabular"
+
+    if model_type == "dl":
+        return _rule_candidates_dl(state, modality)
+
     allowed = state.constraints.allowed_models or _DEFAULT_MODELS
     tried = set(state.search.models_tried)
     untried = [m for m in allowed if m not in tried]
@@ -227,4 +244,93 @@ def _rule_candidates(state: StateObject) -> list[CandidateAction]:
             seen.add(key)
             unique.append(c)
 
+    return unique
+
+
+# ---------------------------------------------------------------------------
+# DL-aware rule candidates
+# ---------------------------------------------------------------------------
+
+def _rule_candidates_dl(state: StateObject, modality: str) -> list[CandidateAction]:
+    """Rule candidates when model_type == 'dl'. Respects modality pools."""
+    sig = state.signals
+    candidates: list[CandidateAction] = []
+
+    if modality == "vision":
+        pool = _DL_VISION_MODELS
+    elif modality == "text":
+        pool = _DL_TEXT_MODELS
+    else:
+        pool = _DL_TABULAR_MODELS
+
+    tried   = set(state.search.models_tried)
+    untried = [m for m in pool if m not in tried]
+
+    if state.resources.budget_exhausted:
+        return [CandidateAction(action_type="terminate", parameters={})]
+
+    if sig.converged != "none" and sig.well_fitted != "none":
+        return [CandidateAction(action_type="terminate", parameters={})]
+
+    # too_slow: drop to the lightweight pretrained model for this modality
+    if sig.too_slow != "none":
+        fallback = _DL_TOO_SLOW_FALLBACK.get(modality)
+        if fallback and fallback not in tried:
+            candidates.append(CandidateAction(
+                action_type="switch_model", parameters={"model_name": fallback}
+            ))
+
+    if sig.underfitting != "none":
+        if untried:
+            candidates.append(CandidateAction(
+                action_type="switch_model", parameters={"model_name": untried[0]}
+            ))
+        candidates.append(CandidateAction(
+            action_type="increase_model_capacity", parameters={"scale": 1.5}
+        ))
+
+    if sig.overfitting != "none":
+        candidates.append(CandidateAction(
+            action_type="modify_regularization", parameters={"direction": "increase"}
+        ))
+        candidates.append(CandidateAction(
+            action_type="decrease_model_capacity", parameters={"scale": 0.75}
+        ))
+
+    if sig.stagnating != "none" or sig.plateau_detected != "none":
+        # Escalate to pretrained tier
+        if untried:
+            candidates.append(CandidateAction(
+                action_type="switch_model", parameters={"model_name": untried[0]}
+            ))
+
+    if sig.diverging != "none":
+        candidates.append(CandidateAction(
+            action_type="change_optimizer", parameters={"learning_rate_scale": 0.1}
+        ))
+
+    # Progressive unfreezing when still underfitting after pretrained model
+    current_arch = getattr(state.model, "model_name", "")
+    _pretrained = {"ResNet18", "EfficientNetB0", "MobileNetV3", "DistilBERT", "TinyBERT"}
+    if current_arch in _pretrained and sig.underfitting != "none":
+        candidates.append(CandidateAction(
+            action_type="unfreeze_backbone", parameters={"n_layers": 1}
+        ))
+
+    if not candidates and untried:
+        candidates.append(CandidateAction(
+            action_type="switch_model", parameters={"model_name": untried[0]}
+        ))
+
+    if not any(c.action_type == "terminate" for c in candidates):
+        candidates.append(CandidateAction(action_type="terminate", parameters={}))
+
+    # Deduplicate
+    seen: set[tuple] = set()
+    unique: list[CandidateAction] = []
+    for c in candidates:
+        key = (c.action_type, str(sorted(c.parameters.items())))
+        if key not in seen:
+            seen.add(key)
+            unique.append(c)
     return unique

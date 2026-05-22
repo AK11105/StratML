@@ -34,7 +34,7 @@ ITERS = [
      {"diminishing_returns": "weak", "diminishing_returns_confidence": 0.49},
      "switch_model", {"model_name": "RNN", "architecture": "RNN"}),
 
-    ("RNN",   "switch_model",           "diminishing_returns",0.57, 0.6102, 0.389, 0.621, 0.232, 31.87, 18, True,
+    ("RNN",   "switch_model",           "diminishing_returns",0.57, 0.6671, 0.341, 0.573, 0.198, 31.87, 18, True,
      {"converged": "weak", "converged_confidence": 0.51, "well_fitted": "weak", "well_fitted_confidence": 0.46},
      "terminate", {}),
 ]
@@ -128,7 +128,7 @@ def run(run_id: str | None = None) -> None:
         if i == max_iter - 1 and next_act != "terminate":
             next_act, next_params = "terminate", {}
         ui_iter_start(iter_num, arch, action)
-        _sleep(rt * 0.4)
+        _sleep(rt)
         if early_stopped:
             _console.print(f"  [yellow]Early stopping at epoch {epochs}/30[/yellow]")
         ui_training(arch, rt)

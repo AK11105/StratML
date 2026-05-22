@@ -27,7 +27,7 @@ def decrease_capacity(hp: dict, scale: float) -> dict:
 
 
 def mutate_regularization(hp: dict, direction: str) -> dict:
-    """Adjust dropout by ±0.1, clamped to [0.0, 0.5]."""
+    """Adjust dropout by +/-0.1, clamped to [0.0, 0.5]."""
     hp = dict(hp)
     current = float(hp.get("dropout", 0.0))
     if direction == "increase":
@@ -46,4 +46,30 @@ def mutate_optimizer(hp: dict, lr_scale: float) -> dict:
         hp.setdefault("scheduler", "cosine")
         wd = float(hp.get("weight_decay", 0.0))
         hp["weight_decay"] = round(min(wd + 1e-4, 1e-2), 6)
+    return hp
+
+
+def unfreeze_backbone(hp: dict, n_layers: int) -> dict:
+    """
+    Progressive unfreezing: mark the last n_layers backbone blocks for training.
+    Sets frozen=False and records unfreeze_layers so the architecture wrapper
+    can call model.unfreeze_last(n_layers) after instantiation.
+    """
+    hp = dict(hp)
+    hp["frozen"] = False
+    hp["unfreeze_layers"] = n_layers
+    return hp
+
+
+def switch_architecture(hp: dict, new_arch: str) -> dict:
+    """
+    Swap architecture, reset incompatible params (hidden_units, layers stay;
+    frozen resets to True for pretrained models).
+    """
+    hp = dict(hp)
+    hp["architecture"] = new_arch
+    _pretrained = {"RESNET18", "EFFICIENTNETB0", "MOBILENETV3", "DISTILBERT", "TINYBERT"}
+    if new_arch.upper().replace("-", "").replace("_", "") in _pretrained:
+        hp["frozen"] = True
+        hp.pop("unfreeze_layers", None)
     return hp

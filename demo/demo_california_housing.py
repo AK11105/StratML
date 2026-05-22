@@ -111,8 +111,7 @@ def run(run_id: str | None = None) -> None:
             next_act, next_params = "terminate", {}
         ui_iter_start(iter_num, model, action)
         # SVR takes long — simulate it
-        sleep_t = min(rt * 0.3, 6.0)
-        _sleep(sleep_t)
+        _sleep(rt)
         ui_training(model, rt)
 
         if model not in models_tried:

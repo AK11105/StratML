@@ -114,7 +114,7 @@ def run(run_id: str | None = None) -> None:
         if i == max_iter - 1 and next_act != "terminate":
             next_act, next_params = "terminate", {}
         ui_iter_start(iter_num, model, action)
-        _sleep(rt * 2)
+        _sleep(rt)
         ui_training(model, rt)
 
         if model not in models_tried:

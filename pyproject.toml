@@ -25,6 +25,7 @@ dependencies = [
   "rich>=13.7.0",
   "matplotlib>=3.8.0",
   "pytest>=9.0.2",
+  "langchain-groq>=1.1.2",
 ]
 
 [project.scripts]

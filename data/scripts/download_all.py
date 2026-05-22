@@ -24,6 +24,8 @@ SCRIPTS = [
     ("california_housing", "download_california_housing.py"),
     ("energy",             "download_energy.py"),
     ("mnist",              "download_mnist.py"),
+    ("cifar10",            "download_cifar10.py"),
+    ("imdb",               "download_imdb.py"),
 ]
 
 MANUAL = [

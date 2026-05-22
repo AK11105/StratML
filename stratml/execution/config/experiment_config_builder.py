@@ -12,7 +12,18 @@ from __future__ import annotations
 from stratml.execution.schemas import ActionDecision, ExperimentConfig
 from stratml.execution.config import ml_mutations, dl_mutations
 
-_DL_MODELS = {"MLP", "CNN1D", "RNN", "PyTorchMLP"}
+_DL_MODELS = {
+    # Tabular
+    "MLP", "CNN1D", "RNN", "ResidualMLP", "TabTransformer", "PyTorchMLP",
+    # Vision
+    "CNN2D", "ResNet18", "EfficientNetB0", "MobileNetV3",
+    # Text
+    "TextCNN", "BiLSTM", "DistilBERT", "TinyBERT",
+}
+
+_DL_VISION_MODELS   = ["CNN2D", "ResNet18", "EfficientNetB0", "MobileNetV3"]
+_DL_TEXT_MODELS     = ["TextCNN", "BiLSTM", "DistilBERT", "TinyBERT"]
+_DL_TABULAR_MODELS  = ["MLP", "CNN1D", "RNN", "ResidualMLP", "TabTransformer"]
 
 # Regularization param per model family
 _REG_PARAM: dict[str, tuple[str, float, float]] = {
@@ -119,6 +130,14 @@ def build_experiment_config(action: ActionDecision, tune: bool = False) -> Exper
     elif action_type == "change_optimizer":
         lr_scale = float(hp.pop("learning_rate_scale", 0.1))
         hp = dl_mutations.mutate_optimizer(hp, lr_scale)
+
+    elif action_type == "unfreeze_backbone":
+        n_layers = int(hp.pop("n_layers", 1))
+        hp = dl_mutations.unfreeze_backbone(hp, n_layers)
+
+    elif action_type == "switch_architecture":
+        new_arch = hp.pop("new_arch", hp.get("architecture", "MLP"))
+        hp = dl_mutations.switch_architecture(hp, new_arch)
 
     elif action_type in ("apply_preprocessing", "early_stop", "terminate"):
         pass

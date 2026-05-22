@@ -111,7 +111,10 @@ def run_pipeline(args):
         "california_housing":  "demo.demo_california_housing",
         "creditcard":          "demo.demo_creditcard",
         "mnist":               "demo.demo_mnist",
+        "mnist_dl":            "demo.demo_mnist_dl",
         "energydata_complete": "demo.demo_energy",
+        "cifar10":             "demo.demo_cifar10",
+        "imdb":                "demo.demo_imdb",
     }
     _dataset_stem = Path(d["path"]).stem
     if _dataset_stem in _DEMO_MAP:
