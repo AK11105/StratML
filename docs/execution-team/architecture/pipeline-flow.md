@@ -62,8 +62,13 @@ df, name = load_dataframe("data/iris.csv")
 **Input:** `(DataFrame, dataset_name, target_column)`
 **Output:** `Dataset`
 
-Validates that the target column exists. Builds the internal `Dataset` object.
-`dataset_type` is always `"tabular"` for now.
+Validates the DataFrame and builds the internal `Dataset` object. Raises `ValueError` on:
+- 0 rows
+- duplicate column names
+- target column not found
+- target entirely null or fewer than 2 unique non-null values
+
+Warns and drops all-null columns. `dataset_type` is always `"tabular"`.
 
 ```python
 dataset = build_dataset(df, "iris", "species")
@@ -83,15 +88,20 @@ Computes the full dataset profile. This is the only object sent to Team B before
 What it computes:
 - numerical vs categorical column split
 - global missing value ratio
-- problem type: `classification` if target has ≤20 unique values or is object dtype, else `regression`
+- problem type (improved): `classification` if target is object dtype; `regression` if float with many unique values relative to dataset size; `classification` if ≤20 unique values; else `regression`
 - class distribution (classification only)
 - per-feature: dtype, unique count, missing %, distribution shape (Shapiro-Wilk + skewness → normal / skewed / uniform / unknown)
 - recommended metrics based on problem type
+- `imbalance_ratio` — max_class / min_class count (classification only)
+- `feature_variance_mean` — mean variance across numerical features
+- `class_entropy` — Shannon entropy of class distribution (classification only)
 
 ```python
 profile = build_profile(dataset)
 # profile.problem_type → "classification"
 # profile.recommended_metrics → ["accuracy", "f1_score"]
+# profile.imbalance_ratio → 1.0
+# profile.class_entropy → 1.585
 ```
 
 ---
@@ -159,9 +169,9 @@ Applies preprocessing in a fixed order. All transformers are fit on `X_train` on
 Order (must not change — each step depends on the previous):
 
 1. **Missing value imputation** — mean / median / mode on numerical; most_frequent on categorical; or drop rows
-2. **Categorical encoding** — one-hot (OneHotEncoder) or label (LabelEncoder per column)
-3. **Numerical scaling** — StandardScaler or MinMaxScaler on numerical columns
-4. **Imbalance correction** — SMOTE oversample or RandomUnderSampler, applied to train only
+2. **Categorical encoding** — one-hot (OneHotEncoder) or label (LabelEncoder per column). Label encoding closure bug fixed — `known` set captured before lambda.
+3. **Numerical scaling** — StandardScaler, MinMaxScaler, or RobustScaler on numerical columns (recomputed after encoding to handle dropped cat cols)
+4. **Imbalance correction** — SMOTE oversample or RandomUnderSampler, applied to train only. Emits `UserWarning` if `imbalanced-learn` is not installed (no silent skip).
 5. **Feature selection** — VarianceThreshold, removes zero-variance features
 
 Returns the same `PreprocessingConfig` that was applied — this gets recorded in `ExperimentResult.preprocessing_applied`.
@@ -179,13 +189,9 @@ clean_split, applied = apply_preprocessing(split, config.preprocessing, profile)
 
 Instantiates a scikit-learn model from the registry, trains on `X_train`, evaluates on `X_val`.
 
-Model registry:
-```
-LogisticRegression
-RandomForestClassifier / Regressor
-GradientBoostingClassifier / Regressor
-SVC / SVR
-```
+Model registry: 24 models across linear, tree, ensemble, SVM, neighbors, and probabilistic families.
+
+When `config.tune=True` and the model has a `_PARAM_GRIDS` entry, runs `RandomizedSearchCV` (10 iterations, 3-fold CV) and returns the best estimator.
 
 ML has no epoch loop — `train_curve` and `val_curve` are single-element lists (log-loss if predict_proba is available, else 0.0).
 
@@ -368,4 +374,6 @@ Everything else (`Dataset`, `DataSplit`, `ExperimentConfig`, `MLPipelineResult`,
 - The orchestrator enforces budget — individual pipeline files do not
 - Every output object is Pydantic-validated before being returned or saved
 - `action_type == "terminate"` must be checked before calling `build_experiment_config`
-- MLflow logging goes inside pipeline files; TensorBoard only in the DL pipeline (not yet wired — see next steps)
+- MLflow logging is wired in `artifact_manager.py` when `enable_mlflow=True` is passed to the orchestrator
+- TensorBoard log dir is set for DL runs but `SummaryWriter` calls are not yet wired inside `dl_pipeline.py`
+- Test set evaluation runs after the loop for ML models — loads `model.pkl`, applies last-iteration preprocessing to `X_test`, saves `test_metrics.json`

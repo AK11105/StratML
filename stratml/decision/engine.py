@@ -147,7 +147,7 @@ class DecisionEngine:
         # Inject DL hyperparams when running in DL mode
         if self.dl_hyperparams and decision.action_type != "terminate":
             decision.parameters.update(self.dl_hyperparams)
-
+            
         # Find predicted_gain for the selected action
         selected_pred = next((p for p in predictions if p.action_type == decision.action_type), None)
         predicted_gain = selected_pred.predicted_gain if selected_pred else 0.0

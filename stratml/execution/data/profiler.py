@@ -26,6 +26,10 @@ def build_profile(dataset: Dataset) -> DataProfile:
     class_distribution = _class_distribution(df[target], problem_type)
     feature_summary = [_describe_feature(df[col]) for col in feature_cols]
 
+    imbalance_ratio = _imbalance_ratio(class_distribution) if problem_type == "classification" else None
+    feature_variance_mean = _feature_variance_mean(df[numerical_cols]) if numerical_cols else None
+    class_entropy = _class_entropy(class_distribution) if problem_type == "classification" else None
+
     return DataProfile(
         dataset_name=dataset.dataset_name,
         dataset_type=dataset.dataset_type,
@@ -39,6 +43,9 @@ def build_profile(dataset: Dataset) -> DataProfile:
         class_distribution=class_distribution,
         feature_summary=feature_summary,
         recommended_metrics=_recommend_metrics(problem_type),
+        imbalance_ratio=imbalance_ratio,
+        feature_variance_mean=feature_variance_mean,
+        class_entropy=class_entropy,
     )
 
 
@@ -49,7 +56,14 @@ def _split_column_types(df: pd.DataFrame) -> tuple[list[str], list[str]]:
 
 
 def _infer_problem_type(target_series: pd.Series) -> str:
-    if target_series.dtype == object or target_series.nunique() <= _CLASSIFICATION_UNIQUE_THRESHOLD:
+    n = len(target_series.dropna())
+    if target_series.dtype == object:
+        return "classification"
+    nunique = target_series.nunique()
+    # Float target with many unique values relative to dataset size → regression
+    if target_series.dtype.kind == "f" and nunique > 10 and nunique / max(n, 1) > 0.05:
+        return "regression"
+    if nunique <= _CLASSIFICATION_UNIQUE_THRESHOLD:
         return "classification"
     return "regression"
 
@@ -95,3 +109,25 @@ def _recommend_metrics(problem_type: str) -> list[str]:
     if problem_type == "classification":
         return ["accuracy", "f1_score"]
     return ["mse", "rmse", "r2"]
+
+
+def _imbalance_ratio(class_distribution: dict[str, int]) -> float | None:
+    if not class_distribution or len(class_distribution) < 2:
+        return None
+    counts = list(class_distribution.values())
+    return round(max(counts) / max(min(counts), 1), 4)
+
+
+def _feature_variance_mean(num_df: pd.DataFrame) -> float | None:
+    if num_df.empty:
+        return None
+    return round(float(num_df.var(ddof=0).mean()), 6)
+
+
+def _class_entropy(class_distribution: dict[str, int]) -> float | None:
+    if not class_distribution:
+        return None
+    counts = np.array(list(class_distribution.values()), dtype=float)
+    probs = counts / counts.sum()
+    entropy = float(-np.sum(probs * np.log2(probs + 1e-12)))
+    return round(entropy, 6)

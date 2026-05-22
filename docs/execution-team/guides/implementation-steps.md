@@ -137,9 +137,9 @@ The agent decides *what* to apply based on `DataProfile`. Team A executes it.
 Steps executed in order:
 
 1. **Missing value handling** — apply `missing_value_strategy` (mean/median/mode imputation or row drop)
-2. **Encoding** — apply `encoding` to `categorical_columns` from `DataProfile` (one-hot or label encoding)
-3. **Scaling** — apply `scaling` to numerical columns (StandardScaler, MinMaxScaler, or none)
-4. **Imbalance correction** — apply `imbalance_strategy` if classification and class imbalance detected (SMOTE oversample or random undersample)
+2. **Encoding** — apply `encoding` to `categorical_columns` from `DataProfile` (one-hot or label encoding). Label encoding closure bug fixed.
+3. **Scaling** — apply `scaling` to numerical columns (StandardScaler, MinMaxScaler, RobustScaler, or none). `active_num_cols` recomputed after encoding to avoid KeyError on dropped columns.
+4. **Imbalance correction** — apply `imbalance_strategy` if classification and class imbalance detected (SMOTE oversample or random undersample). Emits `UserWarning` if `imbalanced-learn` is not installed.
 5. **Feature selection** — apply `feature_selection` if specified (variance threshold filter)
 
 The exact `PreprocessingConfig` that was applied is recorded in `ExperimentResult.preprocessing_applied` so Team B can track what was done across iterations.
@@ -156,6 +156,7 @@ Pipeline selection:
 
 Training responsibilities:
 - Initialize model from config
+- For ML: if `config.tune=True` and model has a param grid, run `RandomizedSearchCV` (10 iterations, 3-fold CV); otherwise single-shot fit
 - Train on training split
 - Validate on validation split
 - Capture per-epoch loss curves (DL) or single-pass metrics (ML)

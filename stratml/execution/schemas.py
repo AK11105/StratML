@@ -47,11 +47,22 @@ class DataProfile(BaseModel):
     class_distribution: dict[str, int] = Field(default_factory=dict)
     feature_summary: list[FeatureInfo]
     recommended_metrics: list[str]
+    imbalance_ratio: Optional[float] = None       # max_class / min_class count
+    feature_variance_mean: Optional[float] = None  # mean variance across numerical features
+    class_entropy: Optional[float] = None          # entropy of class distribution
 
 
 # PreprocessingConfig imported from stratml.core.schemas
 
 
+# Re-exported from core — single source of truth (todo #4)
+from stratml.core.schemas import (  # noqa: F401
+    ExperimentMetrics,
+    ResourceUsage,
+    ArtifactRefs,
+    ExperimentResult,
+    ActionDecision,
+)
 class ExperimentMetrics(BaseModel):
     accuracy: Optional[float] = None
     f1_score: Optional[float] = None
@@ -90,6 +101,8 @@ class ExperimentResult(BaseModel):
     runtime: float
     resource_usage: ResourceUsage
     artifacts: ArtifactRefs
+    early_stopped: Optional[bool] = None   # True if DL early stopping triggered
+    best_epoch: Optional[int] = None       # epoch with lowest val loss (DL only)
 
 
 class ActionDecision(BaseModel):
@@ -118,6 +131,7 @@ class ExperimentConfig(BaseModel):
     preprocessing: PreprocessingConfig
     early_stopping: bool = False
     early_stopping_patience: int = 5
+    tune: bool = False  # when True, ml_pipeline runs RandomizedSearchCV
 
 
 @dataclass

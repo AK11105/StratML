@@ -1,23 +1,26 @@
 #!/usr/bin/env python
+"""
+stratml/cli/main.py
+-------------------
+Entry point — argument parsing and command dispatch only.
+All command logic lives in cli/commands/.
+All config logic lives in cli/config.py.
+"""
+
+import sys
+from pathlib import Path
+
+# Ensure project root is importable when invoked as a script (e.g. via the
+# shell wrapper installed by install.sh: `python stratml/cli/main.py ...`)
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 import argparse
-import yaml
-import sys
-from copy import deepcopy
-from pathlib import Path
-
-DEFAULT_CONFIG = {
-    "mode": "beginner",
-    "dataset": {"path": None, "target_column": None},
-    "execution": {"max_iterations": 5, "timeout_per_run": 300, "random_seed": 42},
-    "split": {"method": "stratified", "test_size": 0.2},
-    "logging": {"enable_mlflow": False, "enable_tensorboard": False, "log_level": "info"},
-    "constraints": {"max_memory": None, "max_cpu": None},
-}
 
 
 def deep_merge(base, override):
@@ -298,36 +301,51 @@ def doctor_check():
 
 def main():
     parser = argparse.ArgumentParser(prog="stratml")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    sub    = parser.add_subparsers(dest="command", required=True)
 
-    run_parser = subparsers.add_parser("run")
-    run_parser.add_argument("config", type=str)
-    run_parser.add_argument("--path", type=str)
-    run_parser.add_argument("--mode", choices=["beginner", "intermediate", "expert"])
-    run_parser.add_argument("--max-iter", type=int)
-    run_parser.add_argument("--dry-run", action="store_true")
+    # ── run ───────────────────────────────────────────────────────────────────
+    run = sub.add_parser("run", help="Run the AutoML pipeline")
+    run.add_argument("config")
+    run.add_argument("--path")
+    run.add_argument("--mode", choices=["beginner", "intermediate", "expert"])
+    run.add_argument("--max-iter", type=int)
+    run.add_argument("--dry-run", action="store_true")
+    run.add_argument("--dl", action="store_true")
+    run.add_argument("--tune", action="store_true", help="Enable RandomizedSearchCV for ML models")
+    run.add_argument("--architecture", choices=["MLP", "CNN1D", "RNN"])
+    run.add_argument("--epochs", type=int)
+    run.add_argument("--lr", type=float)
+    run.add_argument("--batch-size", type=int)
 
-    validate_parser = subparsers.add_parser("validate-config")
-    validate_parser.add_argument("config", type=str)
+    # ── validate-config ───────────────────────────────────────────────────────
+    vc = sub.add_parser("validate-config", help="Validate a config file")
+    vc.add_argument("config")
 
-    profile_parser = subparsers.add_parser("profile-data")
-    profile_parser.add_argument("dataset", type=str)
-    profile_parser.add_argument("target", type=str)
+    # ── profile-data ──────────────────────────────────────────────────────────
+    pd = sub.add_parser("profile-data", help="Profile a dataset")
+    pd.add_argument("dataset")
+    pd.add_argument("target")
 
-    subparsers.add_parser("init")
-    subparsers.add_parser("doctor")
+    # ── init / doctor ─────────────────────────────────────────────────────────
+    sub.add_parser("init",   help="Create a default config.yaml")
+    sub.add_parser("doctor", help="Check environment dependencies")
 
     args = parser.parse_args()
 
     if args.command == "run":
+        from stratml.cli.commands.run import run_pipeline
         run_pipeline(args)
     elif args.command == "validate-config":
+        from stratml.cli.commands.utils import validate_config_cmd
         validate_config_cmd(args)
     elif args.command == "profile-data":
+        from stratml.cli.commands.profile import profile_data
         profile_data(args)
     elif args.command == "init":
+        from stratml.cli.commands.utils import init_config
         init_config()
     elif args.command == "doctor":
+        from stratml.cli.commands.utils import doctor_check
         doctor_check()
 
 

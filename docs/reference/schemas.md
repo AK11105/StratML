@@ -20,11 +20,11 @@ ExperimentResult = {
     # PREPROCESSING (ACTUAL)
     # =========================
     "preprocessing_applied": {
-        "missing_value_strategy": str,
-        "scaling": str,
-        "encoding": str,
-        "imbalance_strategy": str,
-        "feature_selection": str
+        "missing_value_strategy": str,   # mean | median | mode | drop
+        "scaling": str,                  # standard | minmax | robust | none
+        "encoding": str,                 # onehot | label | none
+        "imbalance_strategy": str,       # oversample | undersample | none
+        "feature_selection": str         # variance_threshold | none
     },
 
     # =========================
@@ -109,11 +109,11 @@ ActionDecision = {
     # PREPROCESSING PLAN
     # =========================
     "preprocessing": {
-        "missing_value_strategy": str,
-        "scaling": str,
-        "encoding": str,
-        "imbalance_strategy": str,
-        "feature_selection": str
+        "missing_value_strategy": str,   # mean | median | mode | drop
+        "scaling": str,                  # standard | minmax | robust | none
+        "encoding": str,                 # onehot | label | none
+        "imbalance_strategy": str,       # oversample | undersample | none
+        "feature_selection": str         # variance_threshold | none
     },
 
     # =========================

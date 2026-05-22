@@ -6,6 +6,8 @@ Phase 8 — Assemble ExperimentResult from all phase outputs.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from stratml.execution.schemas import (
     ExperimentConfig, ExperimentMetrics, ResourceUsage,
     ArtifactRefs, PreprocessingConfig, ExperimentResult,
@@ -23,6 +25,8 @@ def build_experiment_result(
     preprocessing_applied: PreprocessingConfig,
     iteration: int,
     dataset_name: str,
+    early_stopped: Optional[bool] = None,
+    best_epoch: Optional[int] = None,
 ) -> ExperimentResult:
     return ExperimentResult(
         experiment_id=config.experiment_id,
@@ -38,4 +42,6 @@ def build_experiment_result(
         runtime=runtime,
         resource_usage=resource_usage,
         artifacts=artifacts,
+        early_stopped=early_stopped,
+        best_epoch=best_epoch,
     )

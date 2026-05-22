@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 
 def _load_calibration_pairs(csv_path: Path):
     """Return (predicted, actual) arrays, or (None, None) if insufficient data."""
+    if not csv_path.exists():
+        return None, None
     try:
         import pandas as pd
 

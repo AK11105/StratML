@@ -50,6 +50,7 @@ _VALID_ACTION_TYPES = {
     "decrease_model_capacity",
     "modify_regularization",
     "change_optimizer",
+    "early_stop",
     "add_preprocessing",
     "terminate",
 }

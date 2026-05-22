@@ -1,9 +1,14 @@
 # RUN.md — Running StratML
 
-Install the CLI first (one-time, run from PowerShell):
+Install the CLI first (one-time):
 
-```powershell
-.\stratml\cli\install.ps1
+```bash
+# Linux / macOS
+bash stratml/cli/install.sh
+source ~/.bashrc
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -File stratml\cli\install.ps1
 ```
 
 Then restart your terminal.

@@ -79,6 +79,18 @@ This means Team B can safely pass extra keys (e.g. `architecture`, `task`) witho
 
 ---
 
+## Hyperparameter Tuning
+
+When `ExperimentConfig.tune=True` and the model name has an entry in `_PARAM_GRIDS`, the pipeline runs `RandomizedSearchCV` (10 iterations, 3-fold CV, `n_jobs=-1`) and returns the best estimator.
+
+`_PARAM_GRIDS` covers: RandomForest, ExtraTrees, GradientBoosting, LogisticRegression, SVC, SVR, Ridge, Lasso, KNeighbors, DecisionTree (classifier and regressor variants).
+
+Models without a grid entry fall back to single-shot training with the provided hyperparameters.
+
+> Note: `tune=True` is not yet exposed via CLI or set by the config builder — it is implemented but must be set programmatically.
+
+---
+
 ## Loss Curves
 
 ML models have no epoch loop. `train_curve` and `val_curve` are always single-element lists.

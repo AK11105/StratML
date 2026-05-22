@@ -51,13 +51,17 @@ class ExecutionOrchestrator:
         time_budget: float | None = None,
         run_id: str = "run",
         log: Optional[Callable[[str], None]] = None,
+        enable_mlflow: bool = False,
+        tune: bool = False,
     ) -> None:
-        self.send_profile = send_profile
-        self.send_result  = send_result
-        self.split_config = split_config or SplitConfig(method="stratified")
-        self.time_budget  = time_budget
-        self.run_id       = run_id
-        self.log          = log or (lambda msg: None)
+        self.send_profile  = send_profile
+        self.send_result   = send_result
+        self.split_config  = split_config or SplitConfig(method="stratified")
+        self.time_budget   = time_budget
+        self.run_id        = run_id
+        self.log           = log or (lambda msg: None)
+        self.enable_mlflow = enable_mlflow
+        self.tune          = tune
 
     def run(self, dataset_path: str, target_column: str) -> None:
         # ── Phase 1+2: Ingest and profile ────────────────────────────────────
@@ -87,17 +91,23 @@ class ExecutionOrchestrator:
         iteration     = 0
         total_runtime = 0.0
         current_model = action.parameters.get("model_name", "LogisticRegression")
+        current_hyperparameters: dict = {}
 
         while action.action_type != "terminate":
             iteration += 1
             self.log(f"\n  --- Iteration {iteration} ---")
             if "model_name" not in action.parameters:
                 action.parameters["model_name"] = current_model
+            # Carry forward previous hyperparameters for capacity/regularization actions
+            if action.action_type in ("increase_model_capacity", "decrease_model_capacity", "modify_regularization", "change_optimizer"):
+                for k, v in current_hyperparameters.items():
+                    action.parameters.setdefault(k, v)
             current_model = action.parameters.get("model_name", current_model)
             self.log(f"  Training : {current_model} ({action.action_type}) ...")
 
             # ── Phase 4: Translate ActionDecision → ExperimentConfig ─────────
-            config = build_experiment_config(action)
+            config = build_experiment_config(action, tune=self.tune)
+            current_hyperparameters = dict(config.hyperparameters)
 
             # ── Phase 4b: Apply preprocessing ────────────────────────────────
             clean_split, applied_preprocessing = apply_preprocessing(
@@ -106,15 +116,22 @@ class ExecutionOrchestrator:
 
             # ── Phase 5: Train ────────────────────────────────────────────────
             t_start = time.perf_counter()
+            dl_result = None
             if config.model_type == "ml":
                 from stratml.execution.pipelines.ml_pipeline import run_ml_pipeline
                 pipeline_result = run_ml_pipeline(config, clean_split)
             else:
                 from stratml.execution.pipelines.dl_pipeline import run_dl_pipeline
-                pipeline_result = run_dl_pipeline(config, clean_split)
+                tb_dir_train = str(Path("outputs") / self.run_id / "tensorboard" / config.experiment_id)
+                pipeline_result = run_dl_pipeline(config, clean_split, tensorboard_log_dir=tb_dir_train)
+                dl_result = pipeline_result
             run_time = round(time.perf_counter() - t_start, 4)
             total_runtime += run_time
-            self.log(f"  Trained in {run_time:.2f}s")
+
+            dl_info = ""
+            if dl_result is not None:
+                dl_info = f" | device={dl_result.device_used} | epochs={dl_result.epochs_run} | early_stopped={dl_result.early_stopped}"
+            self.log(f"  Trained in {run_time:.2f}s{dl_info}")
 
             # ── Phase 6: Metrics ──────────────────────────────────────────────
             metrics = compute_metrics(
@@ -126,9 +143,8 @@ class ExecutionOrchestrator:
             )
 
             # ── Phase 7: Artifacts ────────────────────────────────────────────
-            tb_dir = None
-            if config.model_type == "dl":
-                tb_dir = f"outputs/runs/{config.experiment_id}"
+            tb_dir = str(Path("outputs") / self.run_id / "tensorboard" / config.experiment_id) \
+                if config.model_type == "dl" else None
 
             artifacts = save_artifacts(
                 experiment_id=config.experiment_id,
@@ -137,20 +153,25 @@ class ExecutionOrchestrator:
                 config=config,
                 tensorboard_log_dir=tb_dir,
                 artifacts_root=Path("outputs") / self.run_id / "artifacts",
+                dl_result=dl_result,
+                enable_mlflow=self.enable_mlflow,
             )
 
             # ── Phase 8: Assemble ExperimentResult ───────────────────────────
+            gpu_used = dl_result is not None and dl_result.device_used != "cpu"
             result = build_experiment_result(
                 config=config,
                 metrics=metrics,
                 train_curve=pipeline_result.train_curve,
                 validation_curve=pipeline_result.val_curve,
                 runtime=run_time,
-                resource_usage=ResourceUsage(cpu_time_sec=run_time),
+                resource_usage=ResourceUsage(cpu_time_sec=run_time, gpu_used=gpu_used),
                 artifacts=artifacts,
                 preprocessing_applied=applied_preprocessing,
                 iteration=iteration,
                 dataset_name=profile.dataset_name,
+                early_stopped=dl_result.early_stopped if dl_result else None,
+                best_epoch=dl_result.best_epoch if dl_result else None,
             )
 
             # ── Budget check ──────────────────────────────────────────────────
@@ -163,3 +184,70 @@ class ExecutionOrchestrator:
             self.log("  Evaluating signals & deciding next action...")
             action = self.send_result(result)
             self.log(f"  Decision : {action.action_type} | trigger={action.reason.trigger} | confidence={action.confidence:.2f} | next={action.parameters}")
+
+        # ── Test set evaluation (ML only) ─────────────────────────────────────
+        self.log("\n  --- Test Set Evaluation ---")
+        best_model_path = Path("outputs") / self.run_id / "artifacts" / "model.pkl"
+        if best_model_path.exists() and config.model_type == "ml":
+            try:
+                import joblib
+                best_model = joblib.load(best_model_path)
+                # Apply same preprocessing as last iteration to test split
+                test_split, _ = apply_preprocessing(base_split, config.preprocessing, profile)
+                y_test_pred = best_model.predict(test_split.X_test)
+                test_metrics = compute_metrics(
+                    y_true=test_split.y_test,
+                    y_pred=y_test_pred,
+                    train_curve=[],
+                    val_curve=[],
+                    problem_type=profile.problem_type,
+                )
+                primary_test = test_metrics.accuracy if test_metrics.accuracy is not None else (test_metrics.r2 or 0.0)
+                self.log(f"  Test metrics: primary={primary_test:.4f}")
+                # Persist test metrics alongside the model artifacts
+                import json
+                test_metrics_path = Path("outputs") / self.run_id / "artifacts" / "test_metrics.json"
+                test_metrics_path.write_text(json.dumps(test_metrics.model_dump(), indent=2))
+                self.log(f"  Test metrics saved to {test_metrics_path}")
+            except Exception as exc:
+                self.log(f"  Test set evaluation failed: {exc}")
+        else:
+            self.log("  Skipped (no saved model or DL — attempting DL test eval...)")
+            if config.model_type == "dl":
+                try:
+                    import torch
+                    from stratml.execution.pipelines.dl_architectures import build_model
+                    pth_path = Path("outputs") / self.run_id / "artifacts" / "model.pth"
+                    if pth_path.exists():
+                        ckpt = torch.load(str(pth_path), map_location="cpu", weights_only=False)
+                        test_split, _ = apply_preprocessing(base_split, config.preprocessing, profile)
+                        X_test_np = test_split.X_test.values.astype(__import__("numpy").float32)
+                        input_dim  = X_test_np.shape[1]
+                        hp         = ckpt.get("hyperparameters", config.hyperparameters)
+                        task       = hp.get("task", "classification")
+                        classes    = sorted(base_split.y_train.unique()) if task != "regression" else []
+                        output_dim = len(classes) if classes else 1
+                        arch       = ckpt.get("architecture", hp.get("architecture", "MLP")).upper()
+                        model      = build_model(arch, input_dim, output_dim, hp)
+                        model.load_state_dict(ckpt["state_dict"])
+                        model.eval()
+                        import torch, numpy as np
+                        with torch.no_grad():
+                            out = model(torch.tensor(X_test_np)).numpy()
+                        if task == "regression":
+                            y_test_pred = out.squeeze(1)
+                        else:
+                            label_map = {i: c for i, c in enumerate(classes)}
+                            y_test_pred = np.array([label_map[i] for i in out.argmax(axis=1)])
+                        test_metrics = compute_metrics(
+                            y_true=test_split.y_test, y_pred=y_test_pred,
+                            train_curve=[], val_curve=[], problem_type=profile.problem_type,
+                        )
+                        primary_test = test_metrics.accuracy if test_metrics.accuracy is not None else (test_metrics.r2 or 0.0)
+                        self.log(f"  DL Test metrics: primary={primary_test:.4f}")
+                        import json
+                        test_metrics_path = Path("outputs") / self.run_id / "artifacts" / "test_metrics.json"
+                        test_metrics_path.write_text(json.dumps(test_metrics.model_dump(), indent=2))
+                        self.log(f"  Test metrics saved to {test_metrics_path}")
+                except Exception as exc:
+                    self.log(f"  DL test set evaluation failed: {exc}")
