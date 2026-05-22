@@ -70,13 +70,17 @@ def apply_preprocessing(
             enc = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
             enc.fit(X_train[cat_cols])
             new_cols = enc.get_feature_names_out(cat_cols).tolist()
-            for split_X, name in [(X_train, "train"), (X_val, "val"), (X_test, "test")]:
-                encoded = pd.DataFrame(enc.transform(split_X[cat_cols]), columns=new_cols)
-                split_X.drop(columns=cat_cols, inplace=True)
-                for col in new_cols:
-                    split_X[col] = encoded[col].values
-            # reassign after in-place ops
-            X_train = X_train
+            def _encode_split(split_X):
+                encoded = pd.DataFrame(
+                    enc.transform(split_X[cat_cols]),
+                    columns=new_cols, index=split_X.index,
+                )
+                return pd.concat(
+                    [split_X.drop(columns=cat_cols), encoded], axis=1
+                )
+            X_train = _encode_split(X_train)
+            X_val   = _encode_split(X_val)
+            X_test  = _encode_split(X_test)
         elif config.encoding == "label":
             for col in cat_cols:
                 le = LabelEncoder()
