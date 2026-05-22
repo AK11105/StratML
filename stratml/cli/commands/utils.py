@@ -7,27 +7,52 @@ import sys
 import yaml
 from pathlib import Path
 
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich import box
+
 from stratml.cli.config import DEFAULT_CONFIG
+
+_console = Console(highlight=False)
 
 
 def init_config() -> None:
     with open("config.yaml", "w") as f:
         yaml.dump(DEFAULT_CONFIG, f, sort_keys=False)
-    print("\n  Created config.yaml — edit dataset.path and dataset.target_column before running.\n")
+    _console.print()
+    _console.print(Panel.fit(
+        "[bold green]Created config.yaml[/bold green]\n"
+        "[dim]Edit [/dim][cyan]dataset.path[/cyan][dim] and [/dim][cyan]dataset.target_column[/cyan][dim] before running.[/dim]",
+        border_style="green", padding=(0, 2),
+    ))
+    _console.print()
 
 
 def doctor_check() -> None:
     packages = ["pandas", "numpy", "sklearn", "torch", "pydantic", "mlflow", "yaml"]
-    sep = "-" * 44
-    print(f"\n  Environment Check\n  {sep}")
+    _console.print()
+    _console.print(Panel.fit(
+        "[bold white]Environment Check[/bold white]",
+        border_style="bright_blue", padding=(0, 2),
+    ))
+
+    t = Table(box=box.ROUNDED, border_style="bright_blue",
+              header_style="bold white on bright_blue", show_lines=False)
+    t.add_column("Status",  width=8)
+    t.add_column("Package", style="cyan", width=20)
+    t.add_column("Version", style="dim",  width=16)
+
     for pkg in packages:
         try:
             mod     = importlib.import_module(pkg)
             version = getattr(mod, "__version__", "ok")
-            print(f"  {'ok':<6} {pkg:<20} {version}")
+            t.add_row("[bold green]  ok[/bold green]", pkg, version)
         except ImportError:
-            print(f"  {'MISSING':<6} {pkg}")
-    print(f"  {sep}\n")
+            t.add_row("[bold red]MISSING[/bold red]", pkg, "[dim]—[/dim]")
+
+    _console.print(t)
+    _console.print()
 
 
 def validate_config_cmd(args) -> None:
@@ -35,7 +60,17 @@ def validate_config_cmd(args) -> None:
     config = load_yaml(args.config)
     try:
         validate_config(config)
-        print(f"\n  Config OK — {args.config}\n")
+        _console.print()
+        _console.print(Panel.fit(
+            f"[bold green]Config OK[/bold green]  [dim]—[/dim]  [cyan]{args.config}[/cyan]",
+            border_style="green", padding=(0, 2),
+        ))
+        _console.print()
     except ValueError as e:
-        print(f"\n  Invalid config: {e}\n")
+        _console.print()
+        _console.print(Panel.fit(
+            f"[bold red]Invalid config[/bold red]\n[white]{e}[/white]",
+            border_style="red", padding=(0, 2),
+        ))
+        _console.print()
         sys.exit(1)

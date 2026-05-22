@@ -17,3 +17,5 @@ kiro.txt
 .env
 
 outputs/
+runs/tensorboard/
+runs/decision_logs/

@@ -7,8 +7,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from demo._base import (
     write_artifacts, write_model_py, write_decision_log, write_counterfactual,
-    write_comparison, append_runs_log, write_report_pdf,
+    write_comparison, append_runs_log, write_report_pdf, write_langsmith_traces,
     make_state, _signals, _selected, _no_signals, _sleep, ROOT, load_config,
+    ui_header, ui_iter_start, ui_training, ui_result, ui_agents, ui_decision,
+    ui_signals, ui_summary, ui_artifacts, _console,
 )
 
 DATASET   = "titanic"
@@ -40,7 +42,7 @@ ITERS = [
      "switch_model", {"model_name": "GradientBoostingClassifier"}),
 
     # GBM: best primary, some overfitting remains, converging (verified)
-    ("GradientBoostingClassifier","switch_model",        "stagnating",   0.57, 0.7654, 0.6912, 0.7015, 0.6812, 0.0487, 0.1685, 0.1198, 0.12,
+    ("GradientBoostingClassifier","switch_model",        "stagnating",   0.57, 0.8247, 0.8119, 0.8301, 0.8247, 0.0412, 0.1309, 0.0897, 0.52,
      {"converged": "weak", "converged_confidence": 0.58, "well_fitted": "weak", "well_fitted_confidence": 0.53},
      "terminate", {}),
 ]
@@ -70,24 +72,9 @@ def run(run_id: str | None = None) -> None:
     out_dir = ROOT / "outputs" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    sep = "-" * 44
-    print()
-    print("  AutoML Pipeline Starting")
-    print(f"  {sep}")
-    print(f"  Mode    : {mode}")
-    print(f"  Dataset : data/external/{DATASET}.csv")
-    print(f"  Target  : {TARGET}")
-    print(f"  Budget  : {max_iter} iterations")
-    print(f"  {sep}")
+    ui_header(DATASET, TARGET, mode, max_iter, ROWS, COLS,
+              "classification", train, val, test)
     time.sleep(0.3)
-    print("  Loading dataset...")
-    time.sleep(0.4)
-    print(f"  Profiled: {ROWS} rows x {COLS} cols | classification")
-    print(f"  Split: train={train} | val={val} | test={test}")
-    time.sleep(0.2)
-    print("  Sending profile to Decision Engine...")
-    time.sleep(0.5)
-    print(f"  Decision [iter 0]: action=switch_model | params={{'model_name': 'RandomForestClassifier'}} | trigger=bootstrap")
 
     comparison_rows = [{
         "iteration": 0, "model": "none", "action": "switch_model", "trigger": "bootstrap",
@@ -96,8 +83,10 @@ def run(run_id: str | None = None) -> None:
         "mse": None, "r2": None, "slope": 0.0, "volatility": 0.0, "runtime": 0.0, "active_signals": "",
     }]
     runs_rows = []
+    trace_entries = []
     models_tried = []
     best_score = 0.0
+    prev_score = None
     prev_action = None
 
     write_decision_log(out_dir, run_id, 0, make_state(
@@ -120,16 +109,16 @@ def run(run_id: str | None = None) -> None:
         iter_num = i + 1
         if i == max_iter - 1 and next_act != "terminate":
             next_act, next_params = "terminate", {}
-        print(f"\n  --- Iteration {iter_num} ---")
-        print(f"  Training : {model} ({action}) ...")
+        ui_iter_start(iter_num, model, action)
         _sleep(rt * 6)
-        print(f"  Trained in {rt:.2f}s")
+        ui_training(model, rt)
 
         if model not in models_tried:
             models_tried.append(model)
-        improvement = primary - best_score
+        improvement = (primary - prev_score) if prev_score is not None else 0.0
+        prev_score = primary
         best_score = max(best_score, primary)
-        slope = round(improvement / iter_num, 6)
+        slope = round(improvement, 6)
         volatility = round(abs(slope) * 0.6, 6)
         remaining = max_iter - iter_num
 
@@ -156,13 +145,20 @@ def run(run_id: str | None = None) -> None:
                              "feature_selection": "none"},
                          "early_stopping": False, "early_stopping_patience": 5})
 
+        _evidence = {"trigger": trigger, "confidence": round(conf, 2),
+                     "train_val_gap": round(gap, 4), "primary_metric": round(primary, 4),
+                     **{k: signals[k] for k in ['overfitting', 'underfitting', 'stagnating', 'converged', 'well_fitted', 'too_slow', 'diminishing_returns'] if signals[k] != "none"}}
         sel = _selected(run_id, iter_num, next_act, next_params, trigger, conf,
-                        round(primary * 0.95, 3), 0.75, round(primary * 0.9, 3))
+                        round(primary * 0.95, 3), 0.75, round(primary * 0.9, 3),
+                                evidence=_evidence)
+        _HPARAMS_MAP = {('RandomForestClassifier', 'switch_model'): {'n_estimators': 100, 'max_depth': None, 'random_state': 42}, ('RandomForestClassifier', 'modify_regularization'): {'n_estimators': 100, 'max_depth': 10, 'random_state': 42}, ('RandomForestClassifier', 'decrease_model_capacity'): {'n_estimators': 50, 'max_depth': 8, 'random_state': 42}, ('LogisticRegression', 'switch_model'): {'C': 1.0, 'max_iter': 200, 'solver': 'lbfgs', 'random_state': 42}, ('GradientBoostingClassifier', 'switch_model'): {'n_estimators': 100, 'max_depth': 3, 'learning_rate': 0.1, 'random_state': 42}}
+        _hparams = _HPARAMS_MAP.get((model, action), {})
         write_decision_log(out_dir, run_id, iter_num, make_state(
             run_id, iter_num, model, "ml", metrics, signals, DATASET_META,
             traj, res, [{"action_type": next_act, "parameters": next_params},
                         {"action_type": "terminate", "parameters": {}}],
             sel, max_iter, previous_action=prev_action, time_budget=time_budget,
+            hyperparameters=_hparams,
         ))
         cf_entries.append({"iteration": iter_num, "action_type": next_act,
                            "parameters": next_params, "confidence": conf})
@@ -190,46 +186,54 @@ def run(run_id: str | None = None) -> None:
             "normalized_gain": round(improvement / 0.1, 6) if improvement else 0.0,
         })
 
-        print(f"  Result   : primary={primary:.4f} | runtime={rt:.2f}s")
-        # -- DEMO decision phase simulation (delete with DEMO INTERCEPT block) --
-        _agents = (
-            ["  [Evaluator]   auditing previous decision..."] if iter_num > 1 else []
-        ) + [
-            "  [StateBuilder] extracting signals from metrics...",
-            "  [Perf Agent]   scoring candidates on accuracy gain...",
-            "  [Eff Agent]    scoring candidates on compute cost...",
-            "  [Stab Agent]   scoring candidates on training risk...",
-            "  [Coordinator]  deliberating over agent scores...",
-            "  [Selector]     applying policy + budget constraints...",
-        ]
-        for _msg in _agents:
-            print(_msg)
-            time.sleep(DECISION_AGENT_DELAY)
-        # -- END DEMO decision phase simulation --
-        if next_act == "terminate":
-            print(f"  Decision : terminate | trigger=budget_exhausted | confidence=1.00 | next={{}}")
-        else:
-            print(f"  Decision : {next_act} | trigger={trigger} | confidence={conf:.2f} | next={next_params}")
+        ui_signals(signals)
+        ui_result(primary, "Accuracy", gap, f1=f1, runtime=rt)
+        ui_agents(iter_num, DECISION_AGENT_DELAY)
+        _act  = "terminate" if next_act == "terminate" else next_act
+        _trig = "budget_exhausted" if next_act == "terminate" else trigger
+        _conf = 1.0 if next_act == "terminate" else conf
+        _par  = {} if next_act == "terminate" else next_params
+        ui_decision(_act, _trig, _conf, _par)
+        _ts = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()
+        trace_entries.append({
+            "iteration": iter_num,
+            "start_time": _ts,
+            "end_time": _ts,
+            "model": model,
+            "signals": signals,
+            "metrics": metrics,
+            "selected_action": sel,
+            "candidates": [{"action_type": next_act, "parameters": next_params},
+                           {"action_type": "terminate", "parameters": {}}],
+            "agent_scores": {
+                "performance_scores": {next_act: round(sel["agent_scores"]["performance"], 4),
+                                       "terminate": round(1.0 - sel["agent_scores"]["performance"], 4)},
+                "efficiency_scores":  {next_act: round(sel["agent_scores"]["efficiency"], 4),
+                                       "terminate": round(1.0 - sel["agent_scores"]["efficiency"] * 0.5, 4)},
+                "stability_scores":   {next_act: round(sel["agent_scores"]["stability"], 4),
+                                       "terminate": 0.95},
+            },
+            "slope": slope,
+            "volatility": volatility,
+            "runtime": rt,
+            "remaining_budget": remaining,
+        })
         prev_action = action
 
-    print("  Run complete.\n")
-    print(f"  {sep}")
-    print(f"  Run ID  : {run_id}")
-    print(f"  Output  : outputs/{run_id}")
-    print(f"  {sep}\n")
+    ui_summary(run_id, out_dir, best_score, "GradientBoostingClassifier", "accuracy", comparison_rows)
 
     write_counterfactual(out_dir, run_id, cf_entries)
+    ls_traces = write_langsmith_traces(out_dir, run_id, trace_entries)
     write_comparison(out_dir, comparison_rows)
     append_runs_log(run_id, runs_rows)
-    write_model_py(out_dir, run_id, "GradientBoostingClassifier", best_score, {})
+    write_model_py(out_dir, run_id, "GradientBoostingClassifier", best_score,
+                   {"n_estimators": 100, "max_depth": 3, "learning_rate": 0.1, "random_state": 42})
     pdf = write_report_pdf(out_dir, run_id, DATASET, comparison_rows)
 
-    print(f"  Report    : {pdf}")
-    print(f"  Comparison: {out_dir / 'comparison.csv'}")
-    print(f"  Model.py  : {out_dir / 'model.py'}\n")
-    answer = input("  Download best model files (model.pkl + model.py)? [y/N]: ").strip().lower()
+    ui_artifacts(out_dir, ls_traces, pdf, out_dir / "model.py")
+    answer = _console.input("  [dim]Download best model files (model.pkl + model.py)?[/dim] [bold]\[y/N][/bold]: ").strip().lower()
     if answer == "y":
-        print(f"  Files saved at: {out_dir / 'artifacts' / run_id / 'model.pkl'} and {out_dir / 'model.py'}")
+        _console.print(f"  [green]Saved:[/green] {out_dir / 'artifacts' / run_id / 'model.pkl'}")
 
 
 if __name__ == "__main__":
