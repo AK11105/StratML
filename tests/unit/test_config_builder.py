@@ -52,9 +52,9 @@ class TestActionTypeMapping:
         assert config.hyperparameters.get("C") == pytest.approx(0.1, rel=1e-3)
 
     def test_change_optimizer(self):
-        # lr_scale=0.1 applied to default lr=0.1 -> 0.01
+        # lr_scale=0.1 applied to default lr=1e-3 -> 1e-4
         config = build_experiment_config(_action("change_optimizer", {"model_name": "MLP", "learning_rate_scale": 0.1}))
-        assert config.hyperparameters.get("learning_rate") == pytest.approx(0.01, rel=1e-3)
+        assert config.hyperparameters.get("learning_rate") == pytest.approx(1e-4, rel=1e-3)
 
     def test_apply_preprocessing_keeps_model(self):
         config = build_experiment_config(_action("apply_preprocessing", {"model_name": "SVC"}))

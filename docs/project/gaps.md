@@ -8,13 +8,21 @@
 
 ---
 
-## 2. `stratml/observability/` and `stratml/utils/` are empty
+## 2. LangSmith tracing is silently inactive on every run
 
-**Gap:** Both modules are `__init__.py` stubs. The README promises TensorBoard and LangSmith integration. TensorBoard log directories are created by the orchestrator but nothing is written to them. LangSmith is not wired anywhere.
+**Gap:** The decision layer uses LangChain across 6 files (all agents, `signals.py`, `action_generator.py`). LangSmith auto-traces all of these when `LANGCHAIN_TRACING_V2=true` is set, but there is no `.env` file, no `sample.env`, and nothing loads env vars at startup. Every run discards all decision traces silently.
 
-**Fix (TensorBoard):** In `dl_pipeline.py`, add a `SummaryWriter` that logs train/val loss per epoch to the `tb_dir` already passed in from the orchestrator.
+TensorBoard is resolved — `dl_pipeline.py` already wires `SummaryWriter` when `tensorboard_log_dir` is provided.
 
-**Fix (LangSmith):** Add `LANGCHAIN_TRACING_V2=true` + `LANGCHAIN_API_KEY` to `.env` and `sample.env`. LangChain/LangGraph auto-traces when these are set — no code changes needed beyond documenting it.
+The `observability/` and `utils/` directories mentioned in the original README were never created; their responsibilities were absorbed into `decision/logging/`, `decision/validation/`, `reporting/`, and the pipelines directly.
+
+**Fix:** Add a `load_dotenv()` call at the top of `stratml/decision/engine.py` (the single orchestrator-facing entry point for all decision logic). Add a `sample.env` at the project root documenting the required keys:
+```
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your_key_here
+LANGCHAIN_PROJECT=stratml
+```
+No other code changes needed — LangChain picks up the env vars automatically.
 
 ---
 
