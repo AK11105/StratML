@@ -296,6 +296,7 @@ class StateActionContext(BaseModel):
     previous_action: Optional[str] = None
     previous_action_success: Optional[bool] = None
     action_effect_magnitude: Optional[float] = None
+    previous_signals: Optional["StateSignals"] = None
 
 
 class StateConstraints(BaseModel):

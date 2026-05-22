@@ -186,9 +186,14 @@ def assess_optimization(steps_since: int, improvement_rate: float) -> str:
 
 _TOOLS = [assess_fitting, assess_convergence, assess_stability, assess_efficiency, assess_optimization]
 
-def _build_agent() -> object:
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
-    return create_react_agent(llm, _TOOLS)
+_AGENT = None
+
+def _get_agent() -> object:
+    global _AGENT
+    if _AGENT is None:
+        llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+        _AGENT = create_react_agent(llm, _TOOLS)
+    return _AGENT
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +240,7 @@ def compute_signals(state: StateObject) -> StateSignals:
     )
 
     try:
-        agent   = _build_agent()
+        agent   = _get_agent()
         result  = agent.invoke({"messages": [("human", (
             "You are an ML experiment diagnostician. "
             "Call ALL FIVE tools (assess_fitting, assess_convergence, assess_stability, "

@@ -25,9 +25,48 @@ from stratml.decision.learning.uncertainty import UncertaintyEstimate
 
 log = logging.getLogger(__name__)
 
-_W_PERF = 0.50
-_W_EFF  = 0.25
-_W_STAB = 0.25
+_W_PERF_DEFAULT = 0.50
+_W_EFF_DEFAULT  = 0.25
+_W_STAB_DEFAULT = 0.25
+_EMA_ALPHA = 0.2
+
+
+def _load_agent_weights() -> tuple[float, float, float]:
+    """Compute per-agent EMA weights from evaluation_log.jsonl across all runs."""
+    import glob
+    from pathlib import Path
+    logs = glob.glob("outputs/*/decision_logs/evaluation_log.jsonl")
+    if not logs:
+        return _W_PERF_DEFAULT, _W_EFF_DEFAULT, _W_STAB_DEFAULT
+    try:
+        import json
+        records = []
+        for log_path in logs:
+            with open(log_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        records.append(json.loads(line))
+        if len(records) < 5:
+            return _W_PERF_DEFAULT, _W_EFF_DEFAULT, _W_STAB_DEFAULT
+        # Proxy: high validity + positive cf_impact => perf agent was right
+        # low quality_risk => stability agent was right
+        # low counterfactual_impact cost => efficiency agent was right
+        w_p = w_e = w_s = 0.5
+        for r in records:
+            cf = r.get("counterfactual_impact", 0.0) or 0.0
+            validity = r.get("decision_validity", 0.5) or 0.5
+            risk = r.get("quality_risk", 0.5) or 0.5
+            perf_right = 1.0 if (validity >= 0.5 and cf >= 0) else 0.0
+            eff_right  = 1.0 if cf >= -0.02 else 0.0  # action didnt cost much
+            stab_right = 1.0 if risk < 0.5 else 0.0
+            w_p = (1 - _EMA_ALPHA) * w_p + _EMA_ALPHA * perf_right
+            w_e = (1 - _EMA_ALPHA) * w_e + _EMA_ALPHA * eff_right
+            w_s = (1 - _EMA_ALPHA) * w_s + _EMA_ALPHA * stab_right
+        total = w_p + w_e + w_s or 1.0
+        return round(w_p / total, 4), round(w_e / total, 4), round(w_s / total, 4)
+    except Exception:
+        return _W_PERF_DEFAULT, _W_EFF_DEFAULT, _W_STAB_DEFAULT
 
 
 @dataclass
@@ -53,12 +92,13 @@ def _rule_rank(
     eff_scores: dict[str, float],
     stab_scores: dict[str, float],
 ) -> list[RankedAction]:
+    w_p, w_e, w_s = _load_agent_weights()
     ranked: list[RankedAction] = []
     for e in estimates:
         p  = perf_scores.get(e.action_type, 0.5)
         ef = eff_scores.get(e.action_type, 0.5)
         st = stab_scores.get(e.action_type, 0.5)
-        final = round(_W_PERF * p + _W_EFF * ef + _W_STAB * st, 4)
+        final = round(w_p * p + w_e * ef + w_s * st, 4)
         ranked.append(RankedAction(
             action_type=e.action_type,
             parameters=e.parameters,

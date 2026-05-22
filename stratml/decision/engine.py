@@ -26,9 +26,11 @@ from stratml.decision.agents.coordinator_agent import rank
 from stratml.decision.policy.action_selector import select
 from stratml.decision.logging import decision_logger
 from stratml.decision.validation import counterfactual
+from stratml.decision.agents import evaluator_agent
 from stratml.decision.learning import dataset_builder
+from stratml.decision.learning import meta_memory as _meta_memory
+from stratml.decision.state.meta_features import extract as _extract_meta
 from stratml.decision.learning import value_model as _value_model
-from stratml.decision.validation.counterfactual import record as record_cf
 
 
 class DecisionEngine:
@@ -57,6 +59,8 @@ class DecisionEngine:
         self._last_action: Optional[str]   = None
         self._last_action_success: Optional[bool] = None
         self._last_best_score: Optional[float]    = None  # for observed_gain backfill
+        self._last_signals = None
+        self._last_decision = None
 
         # Redirect all outputs under outputs/<run_id>/
         self._out_dir = Path("outputs") / self.run_id
@@ -72,12 +76,20 @@ class DecisionEngine:
 
     def receive_profile(self, profile: DataProfile) -> ActionDecision:
         self._profile = profile
+        meta = _extract_meta(profile)
+        similar_models = _meta_memory.retrieve_similar_actions(meta)
+        allowed = self.allowed_models
+        if similar_models and allowed:
+            # Prioritise similar models by moving them to front
+            reordered = [m for m in similar_models if m in allowed]
+            rest = [m for m in allowed if m not in reordered]
+            allowed = reordered + rest
         state = build_state_from_profile(
             profile,
             run_id=self.run_id,
             primary_metric=self.primary_metric,
             optimization_goal=self.optimization_goal,
-            allowed_models=self.allowed_models,
+            allowed_models=allowed,
             max_iterations=self.max_iterations,
             time_budget=self.time_budget,
         )
@@ -110,7 +122,12 @@ class DecisionEngine:
             models_tried=self._models_tried,
             repeated_configs=self._repeated_configs,
             remaining_budget=remaining,
+            previous_signals=self._last_signals,
         )
+        if self._last_decision is not None:
+            eval_log = self._out_dir / "decision_logs" / "evaluation_log.jsonl"
+            evaluator_agent._EVAL_LOG = eval_log
+            evaluator_agent.audit(self._last_decision, result, state)
         return self._decide(state)
 
     def _decide(self, state) -> ActionDecision:
@@ -118,7 +135,7 @@ class DecisionEngine:
 
         predictions = predict(state, candidates)
         calibrated  = calibrate(predictions)
-        estimates   = estimate(calibrated)
+        estimates   = estimate(calibrated, state)
 
         perf_scores = performance_agent.score(state, estimates)
         eff_scores  = efficiency_agent.score(state, estimates)
@@ -141,9 +158,16 @@ class DecisionEngine:
             predicted_gain=predicted_gain,
         )
         decision_logger.log(state, candidates, decision)
-        record_cf(decision)
+        runner_up = ranked[1] if len(ranked) > 1 else None
+        counterfactual.record(decision, runner_up)
 
         self._last_action         = decision.action_type
         self._last_action_success = None
         self._last_best_score     = state.trajectory.best_score
+        self._last_signals        = state.signals
+        self._last_decision       = decision
+        if decision.action_type == "terminate" and self._profile is not None:
+            meta = _extract_meta(self._profile)
+            best_model = state.search.models_tried[-1] if state.search.models_tried else "unknown"
+            _meta_memory.record_run(meta, best_model, state.trajectory.best_score, self.run_id)
         return decision

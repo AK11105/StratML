@@ -11,11 +11,11 @@ source ~/.bashrc
 powershell -ExecutionPolicy Bypass -File stratml\cli\install.ps1
 ```
 
-Then restart your terminal. All commands below use `stratml` directly.
+Then restart your terminal.
 
 ---
 
-## Step 1 — Check environment
+## Environment check
 
 ```bash
 stratml doctor
@@ -23,17 +23,59 @@ stratml doctor
 
 ---
 
-## Step 2 — Create a config
+## Profile a dataset
 
 ```bash
-stratml init
+stratml profile-data data/raw/titanic.csv Survived
+stratml profile-data data/raw/pima.csv Outcome
+stratml profile-data data/raw/wine_quality_red.csv quality
+stratml profile-data data/raw/california_housing.csv MedHouseVal
+stratml profile-data data/external/creditcard.csv Class
+stratml profile-data data/raw/mnist.csv label
+stratml profile-data data/raw/energydata_complete.csv Appliances
 ```
-
-Edit the generated `config.yaml` — set `dataset.path` and `dataset.target_column`.
 
 ---
 
-## Step 3 — Validate config
+## Run a demo
+
+Each command below runs the full hardcoded demo for that dataset.  
+Edit `config.yaml` to set `dataset.path` before running, or pass `--path` inline.
+
+```bash
+# Classification — overfitting chain
+stratml run config.yaml --path data/external/titanic.csv 
+
+# Classification — imbalance + regularization
+stratml run config.yaml --path data/raw/pima.csv
+
+# Classification — multiclass, underfitting chain
+stratml run config.yaml --path data/raw/wine_quality_red.csv
+
+# Regression — smooth convergence
+stratml run config.yaml --path data/raw/california_housing.csv
+
+# Classification — extreme imbalance (fraud)
+stratml run config.yaml --path data/external/creditcard.csv
+
+# Multiclass image classification (DL)
+stratml run config.yaml --path data/raw/mnist.csv
+
+# Regression — multi-output energy forecasting
+stratml run config.yaml --path data/raw/energydata_complete.csv
+```
+
+---
+
+## Dry-run (resolve config without executing)
+
+```bash
+stratml run config.yaml --path data/external/titanic.csv --dry-run
+```
+
+---
+
+## Validate config
 
 ```bash
 stratml validate-config config.yaml
@@ -41,79 +83,15 @@ stratml validate-config config.yaml
 
 ---
 
-## Step 4 — Profile a dataset
+## Generate a fresh config
 
 ```bash
-stratml profile-data data/iris.csv species
-```
-
-Prints a full dataset profile. Saves JSON to `outputs/iris/data_profile.json`.
-
----
-
-## Step 5 — Dry-run the pipeline
-
-```bash
-stratml run config.yaml --path data/iris.csv --dry-run
-```
-
-Resolves and prints the full config without executing.
-
----
-
-## Step 6 — Run the full pipeline (ML)
-
-```bash
-stratml run config.yaml
-```
-
-Runs the full AutoML loop: profile → decision engine → ML pipeline → report.
-
----
-
-## Step 7 — Run with deep learning
-
-Pass `--dl` to switch to PyTorch:
-
-```bash
-# Default MLP
-stratml run config.yaml --dl
-
-# CNN1D
-stratml run config.yaml --dl --architecture CNN1D --epochs 50 --lr 0.0005
-
-# RNN
-stratml run config.yaml --dl --architecture RNN --epochs 30 --batch-size 64
-```
-
-Or set `deep_learning.enabled: true` in `config.yaml` to make DL the default.
-
-### DL features active by default
-- GPU auto-selected (cuda → mps → cpu)
-- Early stopping with best-weight restore
-- Gradient clipping (`grad_clip: 1.0`)
-- ReduceLROnPlateau scheduler
-
-### Advanced DL hyperparameters (via config.yaml)
-
-```yaml
-deep_learning:
-  enabled: true
-  architecture: MLP
-  epochs: 50
-  learning_rate: 0.001
-  batch_size: 32
-  weight_decay: 0.0001     # L2 regularization in Adam
-  dropout: 0.2             # dropout probability
-  batch_norm: true         # BatchNorm per hidden layer
-  scheduler: plateau       # plateau | cosine | none
-  grad_clip: 1.0           # max gradient norm (0.0 = disabled)
-  mixed_precision: false   # FP16 AMP — CUDA only
+stratml init
 ```
 
 ---
 
-## What's Implemented
+## Status
 
 | Component | Status |
 |---|---|
@@ -122,16 +100,5 @@ deep_learning:
 | `stratml validate-config` | ✅ |
 | `stratml profile-data` | ✅ |
 | `stratml run --dry-run` | ✅ |
-| `stratml run` (full ML pipeline) | ✅ |
-| `stratml run --dl` (DL pipeline) | ✅ |
-| ML pipelines (scikit-learn, 24 models) | ✅ |
-| DL pipelines (MLP / CNN1D / RNN) | ✅ |
-| GPU support (CUDA / MPS) | ✅ |
-| Mixed precision (FP16 AMP) | ✅ |
-| Gradient clipping | ✅ |
-| TensorBoard training curves | ✅ |
-| Decision agent / rule engine | ✅ |
-| PDF report + comparison.csv | ✅ |
-| model.pkl + model.pth artifacts | ✅ |
-| MLflow logging | 🔲 |
-| LangSmith tracing | 🔲 |
+| `stratml run` (demo datasets) | ✅ hardcoded |
+| `stratml run` (real pipeline) | 🔲 |

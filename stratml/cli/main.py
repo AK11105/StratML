@@ -103,6 +103,29 @@ def run_pipeline(args):
         print()
         return
 
+    # -- DEMO INTERCEPT (delete this block when real pipeline is ready) ----
+    _DEMO_MAP = {
+        "titanic":             "demo.demo_titanic",
+        "pima":                "demo.demo_pima",
+        "wine_quality_red":    "demo.demo_wine_quality",
+        "california_housing":  "demo.demo_california_housing",
+        "creditcard":          "demo.demo_creditcard",
+        "mnist":               "demo.demo_mnist",
+        "energydata_complete": "demo.demo_energy",
+    }
+    _dataset_stem = Path(d["path"]).stem
+    if _dataset_stem in _DEMO_MAP:
+        import importlib
+        _root = str(Path(__file__).resolve().parents[2])
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        _mod = importlib.import_module(_DEMO_MAP[_dataset_stem])
+        from datetime import datetime as _dt, timezone as _tz
+        _run_id = f"{_dataset_stem}_{_dt.now(_tz.utc).strftime('%Y%m%d_%H%M%S')}"
+        _mod.run(run_id=_run_id)
+        return
+    # -- END DEMO INTERCEPT -----------------------------------------------
+
     print()
     print("  AutoML Pipeline Starting")
     print(f"  {sep}")

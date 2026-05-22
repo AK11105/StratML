@@ -31,7 +31,26 @@ _ACTION_COST_PROXY: dict[str, float] = {
     "change_optimizer": 0.4,
     "increase_model_capacity": 0.6,
     "switch_model": 0.7,
+    "add_preprocessing": 0.5,
 }
+
+_ACTION_VOCAB: dict[str, int] = {
+    a: i for i, a in enumerate([
+        "terminate", "switch_model", "increase_model_capacity",
+        "decrease_model_capacity", "modify_regularization",
+        "change_optimizer", "add_preprocessing",
+    ])
+}
+
+_MODEL_VOCAB: dict[str, int] = {
+    m: i for i, m in enumerate([
+        "RandomForestClassifier", "LogisticRegression", "GradientBoostingClassifier",
+        "ExtraTreesClassifier", "SVC", "KNeighborsClassifier", "GaussianNB",
+        "DecisionTreeClassifier", "none",
+    ])
+}
+
+_COMPLEXITY_VOCAB: dict[str, int] = {"none": 0, "low": 1, "medium": 2, "high": 3}
 
 
 @dataclass
@@ -60,9 +79,11 @@ def _load_training_data(csv_path: Path):
             "steps_since_improvement", "num_samples", "num_features",
             "missing_ratio", "runtime", "remaining_budget",
         ]
-        # Encode action_type as integer
-        df["action_type_enc"] = df["action_type"].astype("category").cat.codes
-        X = df[feature_cols + ["action_type_enc"]].fillna(0).values
+        df["action_type_enc"] = df["action_type"].map(_ACTION_VOCAB).fillna(len(_ACTION_VOCAB))
+        # model_name_enc and complexity_hint_enc may not exist in older rows — default 0
+        df["model_name_enc"] = df.get("model_name", "none").map(_MODEL_VOCAB).fillna(len(_MODEL_VOCAB))
+        df["complexity_hint_enc"] = df.get("complexity_hint", "none").map(_COMPLEXITY_VOCAB).fillna(0)
+        X = df[feature_cols + ["action_type_enc", "model_name_enc", "complexity_hint_enc"]].fillna(0).values
         y = df["observed_gain"].astype(float).values
         return X, y
     except Exception as exc:
@@ -74,13 +95,14 @@ def _encode_state_action(state: StateObject, action_type: str) -> list[float]:
     t = state.trajectory
     d = state.dataset
     r = state.resources
-    # action_type_enc: use a stable hash mod 100 as a proxy (consistent within a run)
-    action_enc = abs(hash(action_type)) % 100
+    action_enc = float(_ACTION_VOCAB.get(action_type, len(_ACTION_VOCAB)))
+    model_enc = float(_MODEL_VOCAB.get(state.model.model_name, len(_MODEL_VOCAB)))
+    complexity_enc = float(_COMPLEXITY_VOCAB.get(state.model.complexity_hint or "none", 0))
     return [
         t.best_score, t.improvement_rate, t.slope, t.volatility,
         float(t.steps_since_improvement), float(d.num_samples), float(d.num_features),
         d.missing_ratio, r.runtime, r.remaining_budget or 0.0,
-        float(action_enc),
+        action_enc, model_enc, complexity_enc,
     ]
 
 
